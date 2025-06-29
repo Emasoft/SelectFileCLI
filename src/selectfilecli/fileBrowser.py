@@ -4,12 +4,15 @@
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
 # - Fixed import to use relative import for FileList
 # - Added proper shebang and encoding declaration
+# - Modified tui_file_browser to return selected file path instead of printing
+# - Added type annotation for return value (Optional[str])
 #
 
 import os
 import sys
 import termios
 import tty
+from typing import Optional
 from .FileList import FileList
 
 # ANSI escape codes for terminal control
@@ -47,7 +50,7 @@ def display_files(current_path, fileList, selected_index):
 
 
 # Main TUI function
-def tui_file_browser():
+def tui_file_browser() -> Optional[str]:
     current_path = os.getcwd()
     selected_index = 0
 
@@ -85,16 +88,13 @@ def tui_file_browser():
                 selected_index = 0
             else:
                 sys.stdout.write(CLEAR_SCREEN + RESET_CURSOR)
-                print(f"Selected File: {os.path.join(current_path, selected_entry.name)}")
-                break
+                selected_file = os.path.join(current_path, selected_entry.name)
+                return selected_file
 
         # Quit the TUI with 'q'
         elif key == "q":
             sys.stdout.write(CLEAR_SCREEN + RESET_CURSOR)
-            # help user cd to the path they are at in the fileBrowser
-            print("to go to the target path, run this")
-            print(f"cd {current_path}")
-            break
+            return None
 
 
 if __name__ == "__main__":
