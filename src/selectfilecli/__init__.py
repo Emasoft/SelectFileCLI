@@ -5,6 +5,7 @@
 # - Created main library API function select_file()
 # - Added proper type annotations
 # - Added comprehensive docstring
+# - Updated to use Textual-based FileBrowserApp instead of raw terminal control
 #
 
 """
@@ -34,7 +35,7 @@ def select_file(start_path: Optional[str] = None) -> Optional[str]:
         ...     print(f"You selected: {selected}")
     """
     # Import here to avoid circular imports and only load when needed
-    from .fileBrowser import tui_file_browser
+    from .file_browser_app import FileBrowserApp
 
     # Validate and set start path
     if start_path is None:
@@ -42,20 +43,11 @@ def select_file(start_path: Optional[str] = None) -> Optional[str]:
     elif not os.path.isdir(start_path):
         raise ValueError(f"Start path must be a valid directory: {start_path}")
 
-    # Store original cwd to restore later
-    original_cwd = os.getcwd()
-
-    try:
-        # Change to start directory
-        os.chdir(start_path)
-
-        # Run the file browser and get the selected file
-        selected_file = tui_file_browser()
-        return selected_file
-
-    finally:
-        # Always restore original directory
-        os.chdir(original_cwd)
+    # Create and run the Textual app
+    app = FileBrowserApp(start_path=start_path)
+    selected_file = app.run()
+    
+    return selected_file
 
 
 __all__ = ["select_file"]
