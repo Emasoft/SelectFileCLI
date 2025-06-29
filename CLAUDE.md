@@ -590,6 +590,295 @@ uv tools run bump_my_version <..arguments..>
 ...etc.
 
 
+## Testing Textual TUI Applications - Complete Guide
+
+### Overview
+Textual applications require special testing approaches since they render Terminal User Interfaces. The most effective way is using SVG snapshot testing with `pytest-textual-snapshot`.
+
+### Prerequisites
+
+1. **Install Required Packages**:
+```bash
+# Add to pyproject.toml dev dependencies
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-textual-snapshot>=0.4.0
+
+# Or install directly
+uv pip install pytest pytest-asyncio pytest-textual-snapshot
+```
+
+2. **Configure pytest.ini**:
+```ini
+[pytest]
+testpaths = tests
+asyncio_mode = auto
+asyncio_default_fixture_loop_scope = function
+```
+
+### Setting Up Textual Tests
+
+#### 1. Basic Async Tests (without snapshots)
+
+For testing Textual app behavior, use the `app.run_test()` context manager:
+
+```python
+import pytest
+from textual.pilot import Pilot
+from your_app import YourTextualApp
+
+class TestYourApp:
+    @pytest.mark.asyncio
+    async def test_app_initialization(self):
+        """Test that the app initializes correctly."""
+        app = YourTextualApp()
+        async with app.run_test() as pilot:
+            # pilot is a Pilot instance for controlling the app
+            assert pilot.app.title == "Expected Title"
+    
+    @pytest.mark.asyncio
+    async def test_widget_presence(self):
+        """Test that expected widgets are present."""
+        app = YourTextualApp()
+        async with app.run_test() as pilot:
+            # Query widgets
+            assert pilot.app.query_one("Header")
+            assert pilot.app.query_one("#my-widget-id")
+    
+    @pytest.mark.asyncio
+    async def test_keyboard_interaction(self):
+        """Test keyboard navigation."""
+        app = YourTextualApp()
+        async with app.run_test() as pilot:
+            # Simulate keypresses
+            await pilot.press("tab")
+            await pilot.press("enter")
+            await pilot.press("ctrl+c")
+```
+
+#### 2. SVG Snapshot Testing
+
+SVG snapshots capture the exact visual state of your TUI, including colors, alignment, borders, and formatting.
+
+**Basic snapshot test:**
+```python
+def test_app_snapshot(snap_compare):
+    """Test app visual appearance."""
+    # snap_compare can accept:
+    # 1. Path to a Python file containing the app
+    # 2. An app instance directly
+    
+    app = YourTextualApp()
+    assert snap_compare(app, terminal_size=(80, 24))
+```
+
+**Snapshot test with interactions:**
+```python
+def test_app_with_navigation(snap_compare):
+    """Test app after user interactions."""
+    app = YourTextualApp()
+    
+    # Simulate keypresses before taking snapshot
+    assert snap_compare(
+        app, 
+        press=["down", "down", "tab", "enter"],
+        terminal_size=(80, 24)
+    )
+```
+
+**Snapshot test with setup:**
+```python
+def test_app_with_setup(snap_compare):
+    """Test app with pre-snapshot setup."""
+    app = YourTextualApp()
+    
+    async def run_before(pilot):
+        # This runs before the snapshot is taken
+        await pilot.click("#button")
+        await pilot.hover(".menu-item")
+        # Disable cursor blinking for consistent snapshots
+        pilot.app.query(Input).first().cursor_blink = False
+    
+    assert snap_compare(app, run_before=run_before)
+```
+
+#### 3. Creating Stable Test Apps
+
+For consistent snapshots, create dedicated test apps with fixed data:
+
+**tests/snapshot_apps/test_app.py:**
+```python
+#!/usr/bin/env python3
+from pathlib import Path
+from your_app import YourTextualApp
+
+def create_test_environment():
+    """Create consistent test data."""
+    test_dir = Path("/tmp/test_app_data")
+    if test_dir.exists():
+        import shutil
+        shutil.rmtree(test_dir)
+    
+    test_dir.mkdir(parents=True)
+    # Create your test files/data here
+    return test_dir
+
+if __name__ == "__main__":
+    test_data = create_test_environment()
+    app = YourTextualApp(data_path=test_data)
+    app.run()
+```
+
+**Use in tests:**
+```python
+def test_stable_snapshot(snap_compare):
+    """Test with stable test app."""
+    snapshot_app = Path(__file__).parent / "snapshot_apps" / "test_app.py"
+    assert snap_compare(snapshot_app, terminal_size=(80, 24))
+```
+
+### Managing Snapshots
+
+1. **Generate initial snapshots:**
+```bash
+pytest tests/test_snapshots.py --snapshot-update
+```
+
+2. **Update snapshots after intentional changes:**
+```bash
+pytest tests/test_snapshots.py --snapshot-update
+```
+
+3. **View snapshot differences:**
+When tests fail, an HTML report is generated showing visual diffs:
+```bash
+# After test failure, open:
+open snapshot_report.html
+```
+
+### Project Structure
+
+```
+tests/
+├── __snapshots__/              # SVG snapshots (auto-generated)
+│   └── test_file/
+│       ├── TestClass.test_name.svg
+│       └── ...
+├── snapshot_apps/              # Dedicated apps for snapshot testing
+│   └── test_app.py
+├── conftest.py                 # pytest configuration
+├── test_async_behavior.py      # Async behavioral tests
+└── test_snapshots.py          # SVG snapshot tests
+```
+
+### Best Practices
+
+1. **Separate Concerns**: Keep behavioral tests (async) separate from visual tests (snapshots)
+
+2. **Consistent Environment**: Use fixed paths and data for snapshot tests to avoid false failures
+
+3. **Disable Animations**: Turn off cursor blinking, progress animations, etc. for stable snapshots
+
+4. **Terminal Size**: Always specify `terminal_size` for consistent rendering
+
+5. **Commit Snapshots**: Include SVG files in version control for regression detection
+
+6. **Review Changes**: SVG files are text-based, making it easy to review visual changes in PRs
+
+### Common Issues and Solutions
+
+**Issue: Snapshots fail due to changing timestamps**
+```python
+async def run_before(pilot):
+    # Mock or freeze time-based elements
+    pilot.app.query(Clock).first().freeze_time("12:00:00")
+```
+
+**Issue: Snapshots fail due to random IDs**
+```python
+# pytest-textual-snapshot automatically strips unique IDs from SVGs
+# No action needed
+```
+
+**Issue: Different paths on different systems**
+```python
+# Use consistent test directories
+test_dir = Path("/tmp/myapp_test")  # Same on all systems
+```
+
+### Resources
+
+- **Textual Testing Guide**: https://textual.textualize.io/guide/testing/
+- **pytest-textual-snapshot**: https://github.com/Textualize/pytest-textual-snapshot
+- **Textual Test Examples**: https://github.com/Textualize/textual/tree/main/tests
+- **Snapshot Testing Best Practices**: https://github.com/Textualize/textual/tree/main/tests/snapshot_tests
+
+### Example Test File
+
+Here's a complete example combining all techniques:
+
+```python
+#!/usr/bin/env python3
+"""Comprehensive Textual app tests."""
+
+import pytest
+from pathlib import Path
+from textual.pilot import Pilot
+from textual.widgets import Input
+from myapp import MyTextualApp
+
+class TestMyAppBehavior:
+    """Behavioral tests using async."""
+    
+    @pytest.mark.asyncio
+    async def test_initialization(self):
+        app = MyTextualApp()
+        async with app.run_test() as pilot:
+            assert pilot.app.title == "My App"
+            assert pilot.app.sub_title == "Version 1.0"
+    
+    @pytest.mark.asyncio
+    async def test_user_input(self):
+        app = MyTextualApp()
+        async with app.run_test() as pilot:
+            # Find input widget and type
+            input_widget = pilot.app.query_one(Input)
+            await pilot.click(input_widget)
+            await pilot.type("Hello World")
+            assert input_widget.value == "Hello World"
+
+class TestMyAppVisuals:
+    """Visual regression tests using snapshots."""
+    
+    def test_initial_state(self, snap_compare):
+        """Test initial visual state."""
+        app = MyTextualApp()
+        assert snap_compare(app, terminal_size=(80, 24))
+    
+    def test_after_interaction(self, snap_compare):
+        """Test visual state after user interaction."""
+        app = MyTextualApp()
+        assert snap_compare(
+            app,
+            press=["tab", "space", "down", "enter"],
+            terminal_size=(80, 24)
+        )
+    
+    def test_error_state(self, snap_compare):
+        """Test visual appearance of error state."""
+        async def trigger_error(pilot):
+            await pilot.click("#dangerous-button")
+        
+        app = MyTextualApp()
+        assert snap_compare(
+            app,
+            run_before=trigger_error,
+            terminal_size=(80, 24)
+        )
+```
+
+This approach provides comprehensive testing coverage for Textual applications, combining behavioral verification with visual regression testing.
+
 ## PROJECT SPECIFIC INSTRUCTIONS
 PROJECT NAME: selectFileCLI
 This project is a importable python module to be used as a handy file selection browser from the cli (using tui library textual).
