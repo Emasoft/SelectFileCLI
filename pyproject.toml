@@ -1,0 +1,16 @@
+[project]
+name = "selectfilecli"
+version = "0.1.0"
+description = "A handy file selection browser for CLI applications using Textual TUI"
+readme = "README.md"
+authors = [
+    { name = "Emasoft", email = "713559+Emasoft@users.noreply.github.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=0.47.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
