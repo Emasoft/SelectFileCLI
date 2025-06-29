@@ -56,7 +56,7 @@ if selected_file:
 
 ## Controls
 
-- **‘/“ Arrow Keys**: Navigate through files and directories
+- **Up/Down Arrow Keys**: Navigate through files and directories
 - **Enter**: Select the highlighted file
 - **Enter** (on directory): Enter the directory
 - **q**: Cancel and return None
