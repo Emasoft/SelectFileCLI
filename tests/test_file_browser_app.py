@@ -138,15 +138,34 @@ class TestFileBrowserApp:
             tree = pilot.app.query_one("DirectoryTree")
             assert tree is not None
 
-    @pytest.mark.asyncio
-    async def test_app_snapshot(self, temp_directory):
-        """Test app appearance with snapshot testing."""
-        app = FileBrowserApp(start_path=str(temp_directory))
-        async with app.run_test(size=(80, 24)) as pilot:
-            # Simply verify the app runs without errors
-            # Snapshot testing with Textual requires specific setup
-            assert pilot.app is not None
-            assert pilot.app.title == "Select File Browser"
+    def test_app_visual_snapshot(self, snap_compare):
+        """Test app visual appearance with SVG snapshot testing."""
+        # Use the test app with consistent directory structure
+        snapshot_app_path = Path(__file__).parent / "snapshot_apps" / "test_file_browser.py"
+        
+        # Use snap_compare to take and compare SVG snapshot
+        assert snap_compare(snapshot_app_path, terminal_size=(80, 24))
+    
+    def test_app_navigation_snapshot(self, snap_compare):
+        """Test app appearance after navigation with SVG snapshot."""
+        # Use the test app with consistent directory structure
+        snapshot_app_path = Path(__file__).parent / "snapshot_apps" / "test_file_browser.py"
+        
+        # Navigate down twice and take snapshot
+        assert snap_compare(snapshot_app_path, press=["down", "down"], terminal_size=(80, 24))
+    
+    def test_app_file_selection_snapshot(self, snap_compare):
+        """Test app appearance when selecting a file with SVG snapshot."""
+        # Use the test app with consistent directory structure
+        snapshot_app_path = Path(__file__).parent / "snapshot_apps" / "test_file_browser.py"
+        
+        # Navigate to readme.txt and select it
+        # Note: The exact key sequence depends on the directory structure
+        assert snap_compare(
+            snapshot_app_path, 
+            press=["down", "down", "down", "down", "enter"],  # Navigate to readme.txt and select
+            terminal_size=(80, 24)
+        )
 
 
 class TestSelectFileFunction:

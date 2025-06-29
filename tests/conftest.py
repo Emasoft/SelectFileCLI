@@ -3,12 +3,5 @@
 
 """Pytest configuration for selectfilecli tests."""
 
-import pytest
-from syrupy.extensions.single_file import SingleFileSnapshotExtension
-from syrupy import SnapshotAssertion
-
-
-@pytest.fixture
-def snapshot(snapshot: SnapshotAssertion) -> SnapshotAssertion:
-    """Configure snapshot testing for Textual apps."""
-    return snapshot.use_extension(SingleFileSnapshotExtension)
+# The snap_compare fixture is provided by pytest-textual-snapshot plugin
+# No additional configuration needed for basic SVG snapshot testing
