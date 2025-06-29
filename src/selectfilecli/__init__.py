@@ -51,4 +51,4 @@ def select_file(start_path: Optional[str] = None) -> Optional[str]:
 
 
 __all__ = ["select_file"]
-__version__ = "0.1.1"
+__version__ = "0.3.0"
