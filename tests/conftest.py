@@ -30,11 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 def is_running_in_docker() -> bool:
     """Check if running inside a Docker container."""
-    return (
-        os.path.exists("/.dockerenv")
-        or os.environ.get("DOCKER_CONTAINER") == "true"
-        or (os.path.exists("/proc/1/cgroup") and "docker" in Path("/proc/1/cgroup").read_text())
-    )
+    return os.path.exists("/.dockerenv") or os.environ.get("DOCKER_CONTAINER") == "true" or (os.path.exists("/proc/1/cgroup") and "docker" in Path("/proc/1/cgroup").read_text())
 
 
 def is_running_in_ci() -> bool:
