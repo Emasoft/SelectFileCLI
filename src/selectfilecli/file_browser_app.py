@@ -20,18 +20,15 @@
 
 import os
 from pathlib import Path
-from typing import Optional, List, Literal
-from datetime import datetime
+from typing import Optional, Any, Tuple
 from enum import Enum
 
-from textual import on, work
+from textual import on
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Label, Static, RadioButton, RadioSet
+from textual.widgets import Header, Footer, Label, RadioButton, RadioSet
 from textual.widgets._directory_tree import DirectoryTree
 from textual.binding import Binding
-from textual.reactive import reactive
-from textual.containers import Container, Horizontal, Vertical
-from textual.message import Message
+from textual.containers import Container
 from textual.screen import ModalScreen
 
 
@@ -160,7 +157,7 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 
         self.dismiss((selected_mode, selected_order))
 
-    def on_key(self, event) -> None:
+    def on_key(self, event: Any) -> None:
         """Handle key events."""
         if event.key == "enter":
             self.action_submit()
@@ -171,14 +168,14 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 class CustomDirectoryTree(DirectoryTree):
     """Extended DirectoryTree with sorting capabilities."""
 
-    def __init__(self, path: str, **kwargs) -> None:
+    def __init__(self, path: str, **kwargs: Any) -> None:
         super().__init__(path, **kwargs)
         self._original_path = path
         # Initialize reactive attributes after parent init
         self.tree_sort_mode: SortMode = SortMode.NAME
         self.tree_sort_order: SortOrder = SortOrder.ASCENDING
 
-    def sort_children_by_mode(self, node) -> None:
+    def sort_children_by_mode(self, node: Any) -> None:
         """Sort children of a node based on current sort settings."""
         if not hasattr(node, "_children") or not node._children:
             return
@@ -225,7 +222,7 @@ class CustomDirectoryTree(DirectoryTree):
 
     def on_mount(self) -> None:
         """Called when widget is mounted."""
-        super().on_mount()
+        super().on_mount()  # type: ignore[no-untyped-call]
         # Apply initial sorting
         self.refresh_sorting()
 
@@ -243,7 +240,7 @@ class CustomDirectoryTree(DirectoryTree):
         """Refresh the sorting of all expanded nodes."""
 
         # Sort all expanded nodes
-        def sort_node(node) -> None:
+        def sort_node(node: Any) -> None:
             if node.is_expanded:
                 self.sort_children_by_mode(node)
                 for child in node.children:
@@ -252,7 +249,7 @@ class CustomDirectoryTree(DirectoryTree):
         sort_node(self.root)
         self.refresh()
 
-    def on_directory_tree_directory_selected(self, event) -> None:
+    def on_directory_tree_directory_selected(self, event: Any) -> None:
         """Apply sorting when directory is expanded."""
         # Find the node that was selected
         node = event.node
@@ -338,7 +335,7 @@ class FileBrowserApp(App[Optional[str]]):
         self.exit(self.selected_file)
 
     @on(DirectoryTree.NodeHighlighted)
-    def on_node_highlighted(self, event: DirectoryTree.NodeHighlighted) -> None:
+    def on_node_highlighted(self, event: DirectoryTree.NodeHighlighted[Any]) -> None:
         """Update path display when node is highlighted."""
         if event.node and event.node.data:
             self._update_path_display(str(event.node.data))
@@ -352,10 +349,10 @@ class FileBrowserApp(App[Optional[str]]):
         """Quit the application without selecting a file."""
         self.exit(None)
 
-    async def action_show_sort_dialog(self):
+    async def action_show_sort_dialog(self) -> None:
         """Show the sort options dialog."""
         dialog = SortDialog(self.current_sort_mode, self.current_sort_order)
-        result = await self.push_screen(dialog)
+        result = await self.push_screen(dialog)  # type: ignore[func-returns-value]
 
         if result:
             # Update sort settings

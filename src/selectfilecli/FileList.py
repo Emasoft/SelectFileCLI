@@ -11,54 +11,77 @@
 #
 
 import os
-from posix import DirEntry
+from typing import Dict, List, Optional, Union, Any
 
 
 class FileList:
-    def __init__(self, path):
+    """A class to represent and search through file system directories."""
+
+    def __init__(self, path: str) -> None:
+        """Initialize FileList with a directory path.
+
+        Args:
+            path: The directory path to start from
+        """
         self.path = path
-        self.tree = dict()
+        self.tree: Dict[str, List[os.DirEntry[Any]]] = dict()
 
-    # geet list of DirEntry object,
-    # with DirEntry object, we can get the name and type,
-    #                       we can also get the path of it
-    #                       which we can use to assign the ListItem
+    def get_entry_list(self) -> List[os.DirEntry[Any]]:
+        """Get list of DirEntry objects for the current path.
 
-    # tree is in the form of {directory : list of entries, subdirectory : list of entires in subdirectory, subdirectory2...}
-    def getEntryList(self) -> list:
+        Returns:
+            List of os.DirEntry objects in the directory
+        """
         entryList = []
         with os.scandir(self.path) as entries:
             for entry in entries:
                 entryList.append(entry)
         return entryList
 
-    # get file type
-    # TODO: optimize this for more variety of functions not just provide string
-    def getEntryType(self, entry: DirEntry) -> str:
+    def get_entry_type(self, entry: os.DirEntry[Any]) -> str:
+        """Get the type of a directory entry as a string.
+
+        Args:
+            entry: The directory entry to check
+
+        Returns:
+            'File ' or 'Dir ' depending on entry type
+        """
         if entry.is_file():
             return "File "
         else:
             return "Dir "
 
-    def getDirList(self):
-        entryList = self.getEntryList()
-        return [entry for entry in entryList if entry.is_dir()]
+    def get_dir_list(self) -> List[os.DirEntry[Any]]:
+        """Get list of subdirectories in the current path.
 
-    def searchDir(self, current_depth_relative=0, max_depth=2):
+        Returns:
+            List of os.DirEntry objects that are directories
+        """
+        entry_list = self.get_entry_list()
+        return [entry for entry in entry_list if entry.is_dir()]
+
+    def search_dir(self, current_depth_relative: int = 0, max_depth: int = 2) -> None:
         """recursively searches files downwards to a max depth"""
         if current_depth_relative <= max_depth:
-            dirList = self.getDirList()
-            self.tree[self.path] = [entry for entry in self.getEntryList()]
+            dir_list = self.get_dir_list()
+            self.tree[self.path] = [entry for entry in self.get_entry_list()]
 
             # creating new FileList class based on new path
-            for Dir in dirList:
-                newpath = os.path.join(os.getcwd(), Dir)
-                subDir = FileList(newpath)
-                subDir.searchDir(current_depth_relative + 1, max_depth)
-                self.tree.update(subDir.tree)
+            for dir_entry in dir_list:
+                # Fix: Use self.path instead of os.getcwd()
+                newpath = os.path.join(self.path, dir_entry.name)
+                sub_dir = FileList(newpath)
+                sub_dir.search_dir(current_depth_relative + 1, max_depth)
+                self.tree.update(sub_dir.tree)
 
 
 if __name__ == "__main__":
-    test = FileList(os.path.join(os.getcwd(), "hackUMass7-fileBrowser", "Testing"))
-    test.searchDir()
-    print(test.tree)
+    # Example usage
+    test_path = os.path.join(os.getcwd(), "tests")
+    if os.path.exists(test_path):
+        test = FileList(test_path)
+        test.search_dir(max_depth=1)
+        print(f"Found {len(test.tree)} directories")
+        for path, entries in test.tree.items():
+            print(f"{path}: {len(entries)} entries")

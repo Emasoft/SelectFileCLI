@@ -1,63 +1,8 @@
-src/selectfilecli/FileList.py: note: In member "__init__" of class "FileList":
-src/selectfilecli/FileList.py:13: error: Function is missing a type annotation  [no-untyped-def]
-        def __init__(self, path):
-        ^
-src/selectfilecli/FileList.py:13: note: See https://mypy.rtfd.io/en/stable/_refs.html#code-no-untyped-def for more info
-src/selectfilecli/FileList.py: note: In member "getEntryList" of class "FileList":
-src/selectfilecli/FileList.py:23: error: Missing type parameters for generic type "list"  [type-arg]
-        def getEntryList(self) -> list:
-                                  ^
-src/selectfilecli/FileList.py:23: note: See https://mypy.rtfd.io/en/stable/_refs.html#code-type-arg for more info
-src/selectfilecli/FileList.py: note: In member "getEntryType" of class "FileList":
-src/selectfilecli/FileList.py:32: error: Missing type parameters for generic type "DirEntry"  [type-arg]
-        def getEntryType(self, entry: DirEntry) -> str:
-                                      ^
-src/selectfilecli/FileList.py: note: In member "getDirList" of class "FileList":
-src/selectfilecli/FileList.py:38: error: Function is missing a return type annotation  [no-untyped-def]
-        def getDirList(self):
-        ^
-src/selectfilecli/FileList.py: note: In member "searchDir" of class "FileList":
-src/selectfilecli/FileList.py:42: error: Function is missing a type annotation  [no-untyped-def]
-        def searchDir(self, current_depth_relative=0, max_depth=2):
-        ^
-src/selectfilecli/FileList.py:45: error: Call to untyped function "getDirList" in typed context  [no-untyped-call]
-                dirList = self.getDirList()
-                          ^~~~~~~~~~~~~~~~~
-src/selectfilecli/FileList.py:45: note: See https://mypy.rtfd.io/en/stable/_refs.html#code-no-untyped-call for more info
-src/selectfilecli/FileList.py:51: error: Call to untyped function "FileList" in typed context  [no-untyped-call]
-                    subDir = FileList(newpath)
-                             ^~~~~~~~~~~~~~~~~
-src/selectfilecli/FileList.py:52: error: Call to untyped function "searchDir" in typed context  [no-untyped-call]
-                    subDir.searchDir(current_depth_relative + 1, max_depth)
-                    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-src/selectfilecli/FileList.py: note: At top level:
-src/selectfilecli/FileList.py:57: error: Call to untyped function "FileList" in typed context  [no-untyped-call]
-        test = FileList(os.path.join(os.getcwd(), "hackUMass7-fileBrowser", "Testing"))
-               ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-src/selectfilecli/FileList.py:58: error: Call to untyped function "searchDir" in typed context  [no-untyped-call]
-        test.searchDir()
-        ^~~~~~~~~~~~~~~~
-src/selectfilecli/fileBrowser.py: note: In function "getInput":
-src/selectfilecli/fileBrowser.py:26: error: Function is missing a return type annotation  [no-untyped-def]
-    def getInput():
-    ^
-src/selectfilecli/fileBrowser.py: note: In function "display_files":
-src/selectfilecli/fileBrowser.py:38: error: Function is missing a type annotation  [no-untyped-def]
-    def display_files(current_path, fileList, selected_index):
-    ^
 src/selectfilecli/fileBrowser.py: note: In function "tui_file_browser":
-src/selectfilecli/fileBrowser.py:58: error: Call to untyped function "FileList" in typed context  [no-untyped-call]
-            fileListOBJ = FileList(current_path)
-                          ^~~~~~~~~~~~~~~~~~~~~~
-src/selectfilecli/fileBrowser.py:64: error: Call to untyped function "display_files" in typed context  [no-untyped-call]
-            display_files(current_path, fileList, selected_index)
-            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-src/selectfilecli/fileBrowser.py:66: error: Call to untyped function "getInput" in typed context  [no-untyped-call]
-            key = getInput()
-                  ^~~~~~~~~~
-src/selectfilecli/fileBrowser.py:70: error: Call to untyped function "getInput" in typed context  [no-untyped-call]
-                getInput()  # Skip '['
-                ^~~~~~~~~~
-src/selectfilecli/fileBrowser.py:71: error: Call to untyped function "getInput" in typed context  [no-untyped-call]
-                arrow_key = getInput()
-                            ^~~~~~~~~~
+src/selectfilecli/fileBrowser.py:124: error: Item "dict[str, str]" of "DirEntry[Any] | dict[str, str]" has no attribute "name"  [union-attr]
+                    current_path = os.path.join(current_path, selected_entry.name)
+                                                              ^~~~~~~~~~~~~~~~~~~
+src/selectfilecli/fileBrowser.py:124: note: See https://mypy.rtfd.io/en/stable/_refs.html#code-union-attr for more info
+src/selectfilecli/file_browser_app.py:32: error: Unused "type: ignore" comment  [unused-ignore]
+    from textual.screen import ModalScreen  # type: ignore[import]
+    ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

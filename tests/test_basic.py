@@ -40,27 +40,13 @@ def test_invalid_path():
 
 
 def main():
-    """Run all tests."""
-    print("Running basic tests for selectfilecli...")
-    print("-" * 50)
+    """Run tests using pytest."""
+    import pytest
 
-    tests = [
-        test_import,
-        test_api_exists,
-        test_invalid_path,
-    ]
-
-    passed = 0
-    for test in tests:
-        if test():
-            passed += 1
-
-    print("-" * 50)
-    print(f"Tests passed: {passed}/{len(tests)}")
-
-    return passed == len(tests)
+    # Run pytest on this file
+    exit_code = pytest.main([__file__, "-v"])
+    sys.exit(exit_code)
 
 
 if __name__ == "__main__":
-    success = main()
-    sys.exit(0 if success else 1)
+    main()
