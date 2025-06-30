@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+#
+# Copyright (c) 2024-2025 Emasoft
+# Licensed under the MIT License.
+# See the LICENSE file in the project root for full license text.
+#
 
 """Basic tests for selectfilecli."""
 
@@ -13,44 +18,23 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def test_import():
     """Test that the module can be imported."""
-    try:
-        from selectfilecli import select_file
-
-        print("✓ Import test passed")
-        return True
-    except ImportError as e:
-        print(f"✗ Import test failed: {e}")
-        return False
+    from selectfilecli import select_file
+    assert select_file is not None
 
 
 def test_api_exists():
     """Test that the select_file function exists."""
-    try:
-        from selectfilecli import select_file
-
-        assert hasattr(select_file, "__call__"), "select_file is not callable"
-        print("✓ API exists test passed")
-        return True
-    except Exception as e:
-        print(f"✗ API exists test failed: {e}")
-        return False
+    from selectfilecli import select_file
+    assert hasattr(select_file, "__call__"), "select_file is not callable"
 
 
 def test_invalid_path():
     """Test that invalid path raises ValueError."""
-    try:
-        from selectfilecli import select_file
-
-        try:
-            select_file("/path/that/does/not/exist")
-            print("✗ Invalid path test failed: No exception raised")
-            return False
-        except ValueError:
-            print("✓ Invalid path test passed")
-            return True
-    except Exception as e:
-        print(f"✗ Invalid path test failed with unexpected error: {e}")
-        return False
+    from selectfilecli import select_file
+    import pytest
+    
+    with pytest.raises(ValueError):
+        select_file("/path/that/does/not/exist")
 
 
 def main():

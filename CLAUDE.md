@@ -879,6 +879,305 @@ class TestMyAppVisuals:
 
 This approach provides comprehensive testing coverage for Textual applications, combining behavioral verification with visual regression testing.
 
+## Building Python Packages with uv - Complete Guide
+
+### Prerequisites
+
+1. **Ensure pyproject.toml is properly configured**:
+   - Project metadata (name, version, description, authors)
+   - Dependencies listed in `[project.dependencies]`
+   - Build system specified in `[build-system]`
+   - Python version requirement in `requires-python`
+
+2. **Virtual Environment Setup**:
+```bash
+# Create virtual environment (if not exists)
+uv venv
+
+# Activate environment
+source .venv/bin/activate  # Linux/macOS
+# or
+.venv\Scripts\activate     # Windows
+```
+
+### Step-by-Step Package Building Process
+
+#### 1. Initialize Project (if starting fresh)
+```bash
+# For a library project
+uv init --lib
+
+# For an application
+uv init --app
+
+# Specify Python version
+uv init --python 3.10 --lib
+```
+
+#### 2. Sync Dependencies
+```bash
+# Install all dependencies and create lockfile
+uv sync
+
+# Sync with all extras
+uv sync --all-extras
+
+# Include development dependencies
+uv sync --dev
+
+# Check if environment is synchronized
+uv sync --check
+```
+
+#### 3. Add/Update Dependencies
+```bash
+# Add a dependency
+uv add requests
+
+# Add with version constraint
+uv add "requests>=2.28"
+
+# Add development dependency
+uv add --dev pytest
+
+# Add optional dependency
+uv add --optional api flask
+
+# Add to custom group
+uv add --group docs sphinx
+```
+
+#### 4. Lock Dependencies
+```bash
+# Update lockfile (uv.lock)
+uv lock
+
+# Upgrade all packages
+uv lock --upgrade
+
+# Upgrade specific package
+uv lock --upgrade-package requests
+```
+
+#### 5. Build the Package
+```bash
+# Build both source distribution and wheel
+uv build
+
+# Build only source distribution
+uv build --sdist
+
+# Build only wheel
+uv build --wheel
+
+# Build with constraints
+uv build --build-constraint constraints.txt
+```
+
+### Build Configuration
+
+#### pyproject.toml Structure
+```toml
+[build-system]
+requires = ["hatchling"]  # or setuptools, poetry-core, etc.
+build-backend = "hatchling.build"
+
+[project]
+name = "your-package"
+version = "0.1.0"
+description = "Package description"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [
+    {name = "Your Name", email = "your.email@example.com"}
+]
+dependencies = [
+    "textual>=0.47.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.1.0",
+]
+
+[project.scripts]
+my-cli = "mypackage.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mypackage"]
+```
+
+### Pre-Build Checklist
+
+1. **Version Update**:
+   - Update version in `pyproject.toml`
+   - Update version in `__init__.py`
+   - Update CHANGELOG.md
+
+2. **Code Quality**:
+```bash
+# Format code
+uv run ruff format --line-length=320 src/ tests/
+
+# Lint code
+uv run ruff check --fix src/ tests/
+
+# Type check
+uv run mypy src/
+
+# Run tests
+uv run pytest
+
+# Check coverage
+uv run pytest --cov
+```
+
+3. **Documentation**:
+   - Update README.md
+   - Check docstrings
+   - Update API documentation
+
+4. **License and Headers**:
+   - Ensure LICENSE file exists
+   - Check copyright headers in source files
+
+### Build Output
+
+After running `uv build`, you'll find:
+```
+dist/
+├── your_package-0.1.0-py3-none-any.whl  # Wheel (binary distribution)
+└── your_package-0.1.0.tar.gz            # Source distribution
+```
+
+### Testing the Built Package
+
+```bash
+# Create a test environment
+uv venv test-env
+source test-env/bin/activate
+
+# Install the built wheel
+uv pip install dist/your_package-0.1.0-py3-none-any.whl
+
+# Test the installation
+python -c "import your_package; print(your_package.__version__)"
+
+# Test CLI commands (if any)
+your-cli-command --help
+```
+
+### Common Build Issues and Solutions
+
+1. **Missing dependencies in build**:
+   - Ensure all runtime dependencies are in `[project.dependencies]`
+   - Don't put dev dependencies in main dependencies
+
+2. **Files not included in package**:
+   - Check MANIFEST.in for non-Python files
+   - For hatchling, use `[tool.hatch.build]` configuration
+
+3. **Import errors after installation**:
+   - Verify package structure matches import paths
+   - Check `packages` configuration in build settings
+
+### Build Backends Comparison
+
+- **hatchling** (default): Modern, simple configuration
+- **setuptools**: Legacy, most compatible
+- **poetry-core**: If using Poetry
+- **flit-core**: Minimal, PEP 621 compliant
+- **maturin**: For Rust extensions
+- **scikit-build-core**: For C/C++ extensions
+
+### Advanced Build Configuration
+
+#### Custom Build Steps
+```toml
+[tool.hatch.build.hooks.custom]
+path = "build_hooks.py"
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+dependencies = ["hatch-custom-hook"]
+```
+
+#### Including/Excluding Files
+```toml
+[tool.hatch.build]
+include = [
+    "src/",
+    "LICENSE",
+    "README.md",
+]
+exclude = [
+    "tests/",
+    "docs/",
+    "*.pyc",
+]
+```
+
+### Publishing Preparation
+
+1. **Check package metadata**:
+```bash
+# Verify package contents
+tar -tf dist/your_package-0.1.0.tar.gz
+unzip -l dist/your_package-0.1.0-py3-none-any.whl
+```
+
+2. **Test with TestPyPI**:
+```bash
+# Upload to TestPyPI
+uv publish --repository testpypi
+
+# Test installation from TestPyPI
+uv pip install --index-url https://test.pypi.org/simple/ your-package
+```
+
+3. **Final checks**:
+   - Version number is correct
+   - All tests pass
+   - Documentation is updated
+   - CHANGELOG is updated
+   - Git tag created
+
+### Environment Variables for Build
+
+```bash
+# Control build isolation
+UV_BUILD_ISOLATION=true
+
+# Custom cache directory
+UV_CACHE_DIR=/custom/cache/path
+
+# Offline mode
+UV_OFFLINE=true
+
+# Custom index URL
+UV_INDEX_URL=https://custom.pypi.org/simple/
+```
+
+### Integration with CI/CD
+
+Example GitHub Actions workflow:
+```yaml
+- name: Install uv
+  uses: astral-sh/setup-uv@v5
+
+- name: Build package
+  run: |
+    uv sync --locked
+    uv build
+
+- name: Upload artifacts
+  uses: actions/upload-artifact@v4
+  with:
+    name: dist
+    path: dist/
+```
+
 ## PROJECT SPECIFIC INSTRUCTIONS
 PROJECT NAME: selectFileCLI
 This project is a importable python module to be used as a handy file selection browser from the cli (using tui library textual).
