@@ -9,6 +9,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Required for gitleaks to scan git history
       - name: Install uv
         uses: astral-sh/setup-uv@v3
       - name: Set up Python
