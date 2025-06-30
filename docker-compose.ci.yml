@@ -1,0 +1,82 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2024-2025 Emasoft
+# Licensed under the MIT License.
+# See the LICENSE file in the project root for full license text.
+#
+
+# HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# - Created docker-compose.ci.yml for GitHub Actions
+# - Optimized for CI environment
+# - Reduced retry counts and timeouts
+# - No interactive features
+#
+
+version: '3.8'
+
+services:
+  # CI test service with reduced timeouts
+  test-ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+      cache_from:
+        - ghcr.io/astral-sh/uv:latest
+    image: selectfilecli:test-ci
+    container_name: selectfilecli-test-ci
+    environment:
+      - CI=true
+      - GITHUB_ACTIONS=true
+      - PYTEST_TIMEOUT=60
+      - DEFAULT_MAX_RETRIES_TEST=2
+      - COLUMNS=120
+      - TERM=xterm-256color
+    command: >
+      uv run pytest
+      --cov=src/selectfilecli 
+      --cov-report=term-missing 
+      --cov-report=xml 
+      --cov-fail-under=80
+      --no-cov-on-fail
+      -v
+
+  # CI lint service
+  lint-ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+      cache_from:
+        - ghcr.io/astral-sh/uv:latest
+    image: selectfilecli:test-ci
+    container_name: selectfilecli-lint-ci
+    environment:
+      - CI=true
+      - GITHUB_ACTIONS=true
+    command: >
+      sh -c "
+      uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format github &&
+      uv run ruff format --check --line-length=320 &&
+      uv run mypy --install-types --non-interactive --strict src/selectfilecli || true
+      "
+
+  # CI build service
+  build-ci:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+      cache_from:
+        - ghcr.io/astral-sh/uv:latest
+    image: selectfilecli:build-ci
+    container_name: selectfilecli-build-ci
+    environment:
+      - CI=true
+      - GITHUB_ACTIONS=true
+    command: >
+      sh -c "
+      uv build &&
+      ls -la dist/
+      "

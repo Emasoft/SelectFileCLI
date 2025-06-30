@@ -388,6 +388,7 @@ class TestSelectFileFunction:
 class TestSortDialogAdditional:
     """Additional tests for SortDialog to achieve 100% coverage."""
     
+    @pytest.mark.asyncio
     async def test_sort_dialog_action_submit(self):
         """Test SortDialog action_submit method."""
         dialog = SortDialog(SortMode.NAME, SortOrder.ASCENDING)
@@ -417,6 +418,7 @@ class TestSortDialogAdditional:
             # Check if the dialog action was called by checking result
             assert True  # The action_submit was called successfully
             
+    @pytest.mark.asyncio
     async def test_sort_dialog_on_key_enter(self):
         """Test SortDialog on_key enter handling."""
         dialog = SortDialog(SortMode.NAME, SortOrder.ASCENDING)
@@ -441,6 +443,7 @@ class TestSortDialogAdditional:
             # The on_key handler was called
             assert True
 
+    @pytest.mark.asyncio
     async def test_all_sort_modes(self, temp_directory_with_varied_files):
         """Test all sort modes with CustomDirectoryTree."""
         import time
@@ -466,6 +469,7 @@ class TestSortDialogAdditional:
                 # Verify tree is still functional
                 assert tree.root is not None
                 
+    @pytest.mark.asyncio
     async def test_populate_node_error_handling(self, monkeypatch):
         """Test _populate_node OSError handling."""
         from pathlib import Path
@@ -509,6 +513,7 @@ class TestSortDialogAdditional:
             # Child should still be in the list
             assert len(mock_node._children) == 1
             
+    @pytest.mark.asyncio
     async def test_set_sort_methods(self):
         """Test set_sort_mode and set_sort_order methods."""
         app = FileBrowserApp()
@@ -524,6 +529,7 @@ class TestSortDialogAdditional:
             tree.set_sort_order(SortOrder.DESCENDING)
             assert tree.sort_order == SortOrder.DESCENDING
             
+    @pytest.mark.asyncio
     async def test_sort_dialog_no_selection(self):
         """Test SortDialog action_submit with no selection."""
         dialog = SortDialog(
@@ -543,6 +549,7 @@ class TestSortDialogAdditional:
             # The action_submit was called successfully
             assert True
             
+    @pytest.mark.asyncio
     async def test_custom_directory_tree_watch_path(self):
         """Test CustomDirectoryTree watch_path method."""
         app = FileBrowserApp()
@@ -556,6 +563,7 @@ class TestSortDialogAdditional:
             assert hasattr(tree, 'watch_path')
             assert callable(tree.watch_path)
             
+    @pytest.mark.asyncio
     async def test_on_radio_changed(self):
         """Test SortDialog on_radio_changed method."""
         from textual.widgets import RadioSet
@@ -581,6 +589,7 @@ class TestSortDialogAdditional:
             # Method just passes, so we verify it doesn't crash
             assert True
             
+    @pytest.mark.asyncio
     async def test_populate_node_with_non_directory(self):
         """Test _populate_node with non-directory node."""
         app = FileBrowserApp()
@@ -607,6 +616,7 @@ class TestSortDialogAdditional:
             # The function returns early for non-directories
             assert result is None or result is None  # Either None was returned or exception was caught
             
+    @pytest.mark.asyncio
     async def test_sort_dialog_result_handling(self):
         """Test handling of sort dialog result in FileBrowserApp."""
         app = FileBrowserApp()
@@ -640,6 +650,7 @@ class TestSortDialogAdditional:
             tree = app.query_one(CustomDirectoryTree)
             assert tree.sort_mode == SortMode.SIZE
             
+    @pytest.mark.asyncio
     async def test_sort_dialog_action_submit_defaults(self):
         """Test SortDialog action_submit with no radio selection (defaults)."""
         app = FileBrowserApp()
@@ -663,6 +674,7 @@ class TestSortDialogAdditional:
             # Should use default values
             assert dismissed_result == (SortMode.NAME, SortOrder.ASCENDING)
             
+    @pytest.mark.asyncio
     async def test_unknown_sort_mode(self):
         """Test _populate_node with unknown sort mode to hit default case."""
         app = FileBrowserApp()
@@ -679,6 +691,7 @@ class TestSortDialogAdditional:
             # Should not crash
             assert True
             
+    @pytest.mark.asyncio
     async def test_populate_node_attribute_error(self):
         """Test _populate_node AttributeError handling."""
         app = FileBrowserApp()

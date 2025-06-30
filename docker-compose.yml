@@ -1,0 +1,132 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2024-2025 Emasoft
+# Licensed under the MIT License.
+# See the LICENSE file in the project root for full license text.
+#
+
+# HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# - Created docker-compose.yml for local and CI testing
+# - Supports multiple test profiles
+# - Includes volume mounts for development
+# - Configurable test environments
+#
+
+version: '3.8'
+
+services:
+  # Main test service
+  test:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: selectfilecli:test
+    container_name: selectfilecli-test
+    environment:
+      - CI=${CI:-false}
+      - GITHUB_ACTIONS=${GITHUB_ACTIONS:-false}
+      - PYTEST_TIMEOUT=300
+      - COLUMNS=120
+      - TERM=xterm-256color
+      - UV_NO_SYNC=1
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - test-cache:/root/.cache
+    working_dir: /app
+    command: >
+      sh -c "
+      cd /app &&
+      python -m pytest
+      --cov=src/selectfilecli 
+      --cov-report=term-missing 
+      --cov-report=xml 
+      --cov-fail-under=80
+      -v
+      "
+    profiles:
+      - test
+
+  # Lint service
+  lint:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: selectfilecli:test
+    container_name: selectfilecli-lint
+    environment:
+      - UV_NO_SYNC=1
+    volumes:
+      - ./src:/app/src:ro
+      - ./tests:/app/tests:ro
+      - ./pyproject.toml:/app/pyproject.toml:ro
+      - lint-cache:/root/.cache
+    working_dir: /app
+    command: >
+      sh -c "
+      cd /app &&
+      python -m ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full src tests &&
+      python -m ruff format --check --line-length=320 src tests &&
+      python -m mypy --install-types --non-interactive --strict src/selectfilecli
+      "
+    profiles:
+      - lint
+
+  # Interactive development shell
+  dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: test
+    image: selectfilecli:test
+    container_name: selectfilecli-dev
+    environment:
+      - TERM=xterm-256color
+      - UV_NO_SYNC=1
+    volumes:
+      - ./src:/app/src
+      - ./tests:/app/tests
+      - ./pyproject.toml:/app/pyproject.toml
+      - ./uv.lock:/app/uv.lock
+      - dev-cache:/root/.cache
+    working_dir: /app
+    command: /bin/bash
+    stdin_open: true
+    tty: true
+    profiles:
+      - dev
+
+  # Build verification
+  build:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: builder
+    image: selectfilecli:build
+    container_name: selectfilecli-build
+    volumes:
+      - ./dist:/app/dist
+    command: uv build
+    profiles:
+      - build
+
+  # Production image test
+  prod:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: production
+    image: selectfilecli:prod
+    container_name: selectfilecli-prod
+    command: python -m selectfilecli --help
+    profiles:
+      - prod
+
+volumes:
+  test-cache:
+  lint-cache:
+  dev-cache:
