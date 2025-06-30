@@ -88,3 +88,5 @@ bak/
 
 # Test files
 test.py
+# Private files
+CLAUDE.md
