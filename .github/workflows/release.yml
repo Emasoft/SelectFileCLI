@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+#
+# Copyright (c) 2024-2025 Emasoft
+# Licensed under the MIT License.
+# See the LICENSE file in the project root for full license text.
+#
+
+# HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# - Created release.yml workflow for creating releases
+# - Manual trigger with version input
+# - Creates git tag and GitHub release
+# - Generates release notes automatically
+#
+
+name: Create Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 0.3.1)'
+        required: true
+        type: string
+      release_notes:
+        description: 'Additional release notes (optional)'
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Full history for changelog
+    
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+      with:
+        enable-cache: true
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Validate version format
+      run: |
+        echo "${{ inputs.version }}" | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' || {
+          echo "Error: Version must be in format X.Y.Z"
+          exit 1
+        }
+
+    - name: Update version in pyproject.toml
+      run: |
+        sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' pyproject.toml
+
+    - name: Run tests
+      run: |
+        uv sync --all-extras --dev
+        uv run pytest --tb=short
+
+    - name: Build package
+      run: |
+        uv build
+
+    - name: Commit version bump
+      run: |
+        git config --local user.email "713559+Emasoft@users.noreply.github.com"
+        git config --local user.name "Emasoft"
+        git add pyproject.toml
+        git commit -m "chore: bump version to ${{ inputs.version }}"
+
+    - name: Create and push tag
+      run: |
+        git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"
+        git push origin main
+        git push origin "v${{ inputs.version }}"
+
+    - name: Generate changelog
+      id: changelog
+      run: |
+        # Get commits since last tag
+        LAST_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+        if [ -z "$LAST_TAG" ]; then
+          CHANGELOG=$(git log --pretty=format:"- %s" --reverse)
+        else
+          CHANGELOG=$(git log --pretty=format:"- %s" --reverse ${LAST_TAG}..HEAD)
+        fi
+        
+        # Save to file for GitHub release
+        echo "## What's Changed" > release_notes.md
+        echo "" >> release_notes.md
+        echo "$CHANGELOG" >> release_notes.md
+        echo "" >> release_notes.md
+        if [ -n "${{ inputs.release_notes }}" ]; then
+          echo "## Additional Notes" >> release_notes.md
+          echo "${{ inputs.release_notes }}" >> release_notes.md
+        fi
+
+    - name: Create GitHub Release
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        gh release create "v${{ inputs.version }}" \
+          --title "Release v${{ inputs.version }}" \
+          --notes-file release_notes.md \
+          dist/*

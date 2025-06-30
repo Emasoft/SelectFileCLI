@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Docker testing environment with multi-stage Dockerfile
+- Docker Compose profiles for test, lint, dev, build, and production
+- Comprehensive test suite achieving 93.92% coverage
+- GitHub Actions workflows (lint, test, build, check, publish, release)
+- Pre-commit hooks configuration with uv
+- Version bumping script (bump-version.sh)
+- Publishing documentation (PUBLISHING.md)
+- Release process documentation (RELEASE_PROCESS.md)
+- Build summary documentation
+- Test environment detection for Docker and CI
+- Missing @pytest.mark.asyncio decorators for async tests
+
+### Changed
+- Improved project documentation structure
+- Enhanced README with professional badges and examples
+- Updated all snapshot tests to current UI state
+- Formatted all code with ruff for consistency
+
+### Fixed
+- Async test failures due to missing decorators
+- Snapshot test failures after UI updates
+- Docker volume mounting issues for read-only testing
+
 ## [0.3.0] - 2025-01-29
 
 ### Added
