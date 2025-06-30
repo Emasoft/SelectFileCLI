@@ -90,3 +90,4 @@ bak/
 test.py
 # Private files
 CLAUDE.md
+snapshot_report.html
