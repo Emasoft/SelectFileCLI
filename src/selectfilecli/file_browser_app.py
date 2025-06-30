@@ -14,6 +14,8 @@
 # - Added ascending/descending toggle
 # - Display current highlighted path in header
 # - Sorting controls in footer
+# - Use Textual reactive attributes for sort mode and order
+# - Add watchers to automatically refresh when sort settings change
 #
 
 """Textual-based file browser application."""
@@ -25,6 +27,7 @@ from enum import Enum
 
 from textual import on
 from textual.app import App, ComposeResult
+from textual.reactive import reactive
 from textual.widgets import Header, Footer, Label, RadioButton, RadioSet
 from textual.widgets._directory_tree import DirectoryTree
 from textual.binding import Binding
@@ -168,12 +171,12 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 class CustomDirectoryTree(DirectoryTree):
     """Extended DirectoryTree with sorting capabilities."""
 
+    tree_sort_mode = reactive(SortMode.NAME)
+    tree_sort_order = reactive(SortOrder.ASCENDING)
+
     def __init__(self, path: str, **kwargs: Any) -> None:
         super().__init__(path, **kwargs)
         self._original_path = path
-        # Initialize reactive attributes after parent init
-        self.tree_sort_mode: SortMode = SortMode.NAME
-        self.tree_sort_order: SortOrder = SortOrder.ASCENDING
 
     def sort_children_by_mode(self, node: Any) -> None:
         """Sort children of a node based on current sort settings."""
@@ -226,15 +229,21 @@ class CustomDirectoryTree(DirectoryTree):
         # Apply initial sorting
         self.refresh_sorting()
 
-    def set_sort_mode(self, mode: SortMode) -> None:
-        """Set sort mode and refresh."""
-        self.tree_sort_mode = mode
+    def watch_tree_sort_mode(self, old_mode: SortMode, new_mode: SortMode) -> None:
+        """React to sort mode changes."""
         self.refresh_sorting()
 
-    def set_sort_order(self, order: SortOrder) -> None:
-        """Set sort order and refresh."""
-        self.tree_sort_order = order
+    def watch_tree_sort_order(self, old_order: SortOrder, new_order: SortOrder) -> None:
+        """React to sort order changes."""
         self.refresh_sorting()
+
+    def set_sort_mode(self, mode: SortMode) -> None:
+        """Set sort mode."""
+        self.tree_sort_mode = mode
+
+    def set_sort_order(self, order: SortOrder) -> None:
+        """Set sort order."""
+        self.tree_sort_order = order
 
     def refresh_sorting(self) -> None:
         """Refresh the sorting of all expanded nodes."""
