@@ -99,29 +99,47 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 
             with RadioSet(id="sort-modes"):
                 yield RadioButton("Name", value=True if self.current_mode == SortMode.NAME else False)
-                yield RadioButton("Creation Date", value=True if self.current_mode == SortMode.CREATED else False)
-                yield RadioButton("Last Accessed", value=True if self.current_mode == SortMode.ACCESSED else False)
-                yield RadioButton("Last Modified", value=True if self.current_mode == SortMode.MODIFIED else False)
+                yield RadioButton(
+                    "Creation Date",
+                    value=True if self.current_mode == SortMode.CREATED else False,
+                )
+                yield RadioButton(
+                    "Last Accessed",
+                    value=True if self.current_mode == SortMode.ACCESSED else False,
+                )
+                yield RadioButton(
+                    "Last Modified",
+                    value=True if self.current_mode == SortMode.MODIFIED else False,
+                )
                 yield RadioButton("Size", value=True if self.current_mode == SortMode.SIZE else False)
-                yield RadioButton("Extension", value=True if self.current_mode == SortMode.EXTENSION else False)
+                yield RadioButton(
+                    "Extension",
+                    value=True if self.current_mode == SortMode.EXTENSION else False,
+                )
 
             yield Label("Sort Order:", classes="title")
             with RadioSet(id="sort-order"):
-                yield RadioButton("Ascending ↓", value=True if self.current_order == SortOrder.ASCENDING else False)
-                yield RadioButton("Descending ↑", value=True if self.current_order == SortOrder.DESCENDING else False)
+                yield RadioButton(
+                    "Ascending ↓",
+                    value=True if self.current_order == SortOrder.ASCENDING else False,
+                )
+                yield RadioButton(
+                    "Descending ↑",
+                    value=True if self.current_order == SortOrder.DESCENDING else False,
+                )
 
             yield Label("[Enter] Select  [Escape] Cancel", classes="help")
 
-    def on_mount(self):
+    def on_mount(self) -> None:
         """Set initial focus."""
         self.query_one("#sort-modes").focus()
 
     @on(RadioSet.Changed)
-    def on_radio_changed(self, event: RadioSet.Changed):
+    def on_radio_changed(self, event: RadioSet.Changed) -> None:
         """Handle radio selection."""
         pass  # Just track the selection
 
-    def action_submit(self):
+    def action_submit(self) -> None:
         """Submit the selected values."""
         # Get selected sort mode
         mode_set = self.query_one("#sort-modes", RadioSet)
@@ -142,7 +160,7 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 
         self.dismiss((selected_mode, selected_order))
 
-    def on_key(self, event):
+    def on_key(self, event) -> None:
         """Handle key events."""
         if event.key == "enter":
             self.action_submit()
@@ -153,14 +171,14 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 class CustomDirectoryTree(DirectoryTree):
     """Extended DirectoryTree with sorting capabilities."""
 
-    def __init__(self, path: str, **kwargs):
+    def __init__(self, path: str, **kwargs) -> None:
         super().__init__(path, **kwargs)
         self._original_path = path
         # Initialize reactive attributes after parent init
-        self.sort_mode = SortMode.NAME
-        self.sort_order = SortOrder.ASCENDING
+        self.tree_sort_mode: SortMode = SortMode.NAME
+        self.tree_sort_order: SortOrder = SortOrder.ASCENDING
 
-    def sort_children(self, node):
+    def sort_children_by_mode(self, node) -> None:
         """Sort children of a node based on current sort settings."""
         if not hasattr(node, "_children") or not node._children:
             return
@@ -177,17 +195,18 @@ class CustomDirectoryTree(DirectoryTree):
                 stat = path.stat()
 
                 # Extract sort key based on mode
-                if self.sort_mode == SortMode.NAME:
+                sort_key: str | float | int
+                if self.tree_sort_mode == SortMode.NAME:
                     sort_key = path.name.lower()
-                elif self.sort_mode == SortMode.CREATED:
+                elif self.tree_sort_mode == SortMode.CREATED:
                     sort_key = stat.st_ctime
-                elif self.sort_mode == SortMode.ACCESSED:
+                elif self.tree_sort_mode == SortMode.ACCESSED:
                     sort_key = stat.st_atime
-                elif self.sort_mode == SortMode.MODIFIED:
+                elif self.tree_sort_mode == SortMode.MODIFIED:
                     sort_key = stat.st_mtime
-                elif self.sort_mode == SortMode.SIZE:
+                elif self.tree_sort_mode == SortMode.SIZE:
                     sort_key = stat.st_size if path.is_file() else 0
-                elif self.sort_mode == SortMode.EXTENSION:
+                elif self.tree_sort_mode == SortMode.EXTENSION:
                     sort_key = path.suffix.lower() if path.is_file() else ""
                 else:
                     sort_key = path.name.lower()
@@ -198,42 +217,42 @@ class CustomDirectoryTree(DirectoryTree):
                 children_info.append((child, str(child.label).lower(), False))
 
         # Sort: directories first, then by sort key
-        reverse = self.sort_order == SortOrder.DESCENDING
+        reverse = self.tree_sort_order == SortOrder.DESCENDING
         children_info.sort(key=lambda x: (not x[2], x[1]), reverse=reverse)
 
         # Update children order
         node._children = [info[0] for info in children_info]
 
-    def on_mount(self):
+    def on_mount(self) -> None:
         """Called when widget is mounted."""
         super().on_mount()
         # Apply initial sorting
         self.refresh_sorting()
 
-    def set_sort_mode(self, mode: SortMode):
+    def set_sort_mode(self, mode: SortMode) -> None:
         """Set sort mode and refresh."""
-        self.sort_mode = mode
+        self.tree_sort_mode = mode
         self.refresh_sorting()
 
-    def set_sort_order(self, order: SortOrder):
+    def set_sort_order(self, order: SortOrder) -> None:
         """Set sort order and refresh."""
-        self.sort_order = order
+        self.tree_sort_order = order
         self.refresh_sorting()
 
-    def refresh_sorting(self):
+    def refresh_sorting(self) -> None:
         """Refresh the sorting of all expanded nodes."""
 
         # Sort all expanded nodes
-        def sort_node(node):
+        def sort_node(node) -> None:
             if node.is_expanded:
-                self.sort_children(node)
+                self.sort_children_by_mode(node)
                 for child in node.children:
                     sort_node(child)
 
         sort_node(self.root)
         self.refresh()
 
-    def on_directory_tree_directory_selected(self, event):
+    def on_directory_tree_directory_selected(self, event) -> None:
         """Apply sorting when directory is expanded."""
         # Find the node that was selected
         node = event.node
@@ -324,16 +343,16 @@ class FileBrowserApp(App[Optional[str]]):
         if event.node and event.node.data:
             self._update_path_display(str(event.node.data))
 
-    def _update_path_display(self, path: str):
+    def _update_path_display(self, path: str) -> None:
         """Update the path display label."""
         path_label = self.query_one("#path-display", Label)
         path_label.update(f"Path: {path}")
 
-    def action_quit(self) -> None:
+    async def action_quit(self) -> None:
         """Quit the application without selecting a file."""
         self.exit(None)
 
-    async def action_show_sort_dialog(self) -> None:
+    async def action_show_sort_dialog(self):
         """Show the sort options dialog."""
         dialog = SortDialog(self.current_sort_mode, self.current_sort_order)
         result = await self.push_screen(dialog)
