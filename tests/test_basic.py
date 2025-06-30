@@ -15,6 +15,7 @@ def test_import():
     """Test that the module can be imported."""
     try:
         from selectfilecli import select_file
+
         print("✓ Import test passed")
         return True
     except ImportError as e:
@@ -26,7 +27,8 @@ def test_api_exists():
     """Test that the select_file function exists."""
     try:
         from selectfilecli import select_file
-        assert hasattr(select_file, '__call__'), "select_file is not callable"
+
+        assert hasattr(select_file, "__call__"), "select_file is not callable"
         print("✓ API exists test passed")
         return True
     except Exception as e:
@@ -38,6 +40,7 @@ def test_invalid_path():
     """Test that invalid path raises ValueError."""
     try:
         from selectfilecli import select_file
+
         try:
             select_file("/path/that/does/not/exist")
             print("✗ Invalid path test failed: No exception raised")
@@ -54,21 +57,21 @@ def main():
     """Run all tests."""
     print("Running basic tests for selectfilecli...")
     print("-" * 50)
-    
+
     tests = [
         test_import,
         test_api_exists,
         test_invalid_path,
     ]
-    
+
     passed = 0
     for test in tests:
         if test():
             passed += 1
-    
+
     print("-" * 50)
     print(f"Tests passed: {passed}/{len(tests)}")
-    
+
     return passed == len(tests)
 
 

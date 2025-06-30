@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+#
+# Copyright (c) 2024-2025 Emasoft
+# Licensed under the MIT License.
+# See the LICENSE file in the project root for full license text.
+#
 
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
 # - Added proper shebang and encoding declaration

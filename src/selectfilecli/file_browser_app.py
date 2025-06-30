@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+#
+# Copyright (c) 2024-2025 Emasoft
+# Licensed under the MIT License.
+# See the LICENSE file in the project root for full license text.
+#
 
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
 # - Created new Textual-based file browser application
@@ -165,7 +170,7 @@ class CustomDirectoryTree(DirectoryTree):
         for child in node._children:
             try:
                 # child.data is a DirEntry object, get its path
-                if hasattr(child.data, 'path'):
+                if hasattr(child.data, "path"):
                     path = Path(child.data.path)
                 else:
                     path = Path(str(child.data))

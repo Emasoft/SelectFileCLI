@@ -1,0 +1,26 @@
+feat: replace cycling sort with modal dialog for file browser
+
+Refactored the file browser's sorting interface from a cycling approach
+(repeatedly pressing 's') to a modal dialog with radio button selection.
+Users now press 'S' once to open a dialog showing all sort modes and
+order options, improving discoverability and reducing keystrokes.
+
+The implementation adds a new SortDialog class using Textual's ModalScreen,
+provides visual feedback with radio buttons, and simplifies the footer to
+show only essential commands. This change addresses user feedback about
+the previous cycling interface being non-intuitive.
+
+BREAKING CHANGE: Removed individual sort shortcuts (n/d/z/e/o). Users must
+now access all sorting options through the unified sort dialog.
+
+- Add SortDialog modal with RadioSet widgets for sort selection
+- Support sort modes: Name, Creation, Accessed, Modified, Size, Extension  
+- Show sort order with visual arrows (Ascending ↓ / Descending ↑)
+- Fix CustomDirectoryTree to handle DirEntry objects correctly
+- Remove cycling sort mode and individual keyboard shortcuts
+- Update all 24 tests to work with new dialog-based interaction
+- Achieve 80% test coverage (up from ~78%)
+- Update version to 0.3.0 for this UI breaking change
+
+Fixes: TypeError when DirectoryTree nodes contained DirEntry objects
+Tests: All tests passing with updated SVG snapshots

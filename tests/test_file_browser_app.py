@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+#
+# Copyright (c) 2024-2025 Emasoft
+# Licensed under the MIT License.
+# See the LICENSE file in the project root for full license text.
+#
 
 """Tests for the Textual file browser application."""
 
@@ -226,13 +231,14 @@ class TestFileBrowserApp:
         async with app.run_test() as pilot:
             # Check initial sort mode
             assert app.current_sort_mode == SortMode.NAME
-            
+
             # Press 's' to open dialog
             await pilot.press("s")
             await pilot.pause(0.1)
-            
+
             # Check if dialog is visible
             from selectfilecli.file_browser_app import SortDialog
+
             dialog = pilot.app.screen_stack[-1]
             assert isinstance(dialog, SortDialog)
 
@@ -243,20 +249,21 @@ class TestFileBrowserApp:
         async with app.run_test() as pilot:
             # Check initial sort mode
             assert app.current_sort_mode == SortMode.NAME
-            
+
             # Open sort dialog
             await pilot.press("s")
             await pilot.pause(0.2)
-            
+
             # Check dialog is open
             from selectfilecli.file_browser_app import SortDialog
+
             dialog = pilot.app.screen_stack[-1]
             assert isinstance(dialog, SortDialog)
-            
+
             # Cancel the dialog with escape
             await pilot.press("escape")
             await pilot.pause(0.1)
-            
+
             # Mode should remain unchanged
             assert app.current_sort_mode == SortMode.NAME
 
@@ -289,7 +296,7 @@ class TestFileBrowserApp:
         snapshot_app_path = Path(__file__).parent / "snapshot_apps" / "test_sorting_browser.py"
         # Open sort dialog
         assert snap_compare(snapshot_app_path, press=["s"], terminal_size=(80, 24))
-    
+
     @pytest.mark.asyncio
     async def test_sort_dialog_cancel(self, temp_directory_with_varied_files):
         """Test canceling the sort dialog leaves settings unchanged."""
@@ -298,17 +305,17 @@ class TestFileBrowserApp:
             # Save initial settings
             initial_mode = app.current_sort_mode
             initial_order = app.current_sort_order
-            
+
             # Open and cancel dialog
             await pilot.press("s")
             await pilot.pause(0.1)
             await pilot.press("escape")
             await pilot.pause(0.1)
-            
+
             # Settings should be unchanged
             assert app.current_sort_mode == initial_mode
             assert app.current_sort_order == initial_order
-    
+
     @pytest.mark.asyncio
     async def test_footer_shows_sort_binding(self, temp_directory):
         """Test that footer shows the Sort binding."""
@@ -321,13 +328,13 @@ class TestFileBrowserApp:
 
 class TestSortDialog:
     """Test the SortDialog class directly."""
-    
+
     def test_sort_dialog_initialization(self):
         """Test SortDialog initialization."""
         dialog = SortDialog(SortMode.SIZE, SortOrder.DESCENDING)
         assert dialog.current_mode == SortMode.SIZE
         assert dialog.current_order == SortOrder.DESCENDING
-    
+
     def test_custom_directory_tree_init(self):
         """Test CustomDirectoryTree initialization."""
         tree = CustomDirectoryTree("/tmp")
