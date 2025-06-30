@@ -280,10 +280,10 @@ class TestFileBrowserApp:
             await pilot.pause(0.1)
 
             # Check that tree has sort settings
-            assert hasattr(tree, "sort_mode")
-            assert hasattr(tree, "sort_order")
-            assert tree.sort_mode == SortMode.NAME
-            assert tree.sort_order == SortOrder.ASCENDING
+            assert hasattr(tree, "tree_sort_mode")
+            assert hasattr(tree, "tree_sort_order")
+            assert tree.tree_sort_mode == SortMode.NAME
+            assert tree.tree_sort_order == SortOrder.ASCENDING
 
     # Snapshot tests for different sort modes
     def test_sort_by_name_snapshot(self, snap_compare):
@@ -340,8 +340,8 @@ class TestSortDialog:
         """Test CustomDirectoryTree initialization."""
         tree = CustomDirectoryTree("/tmp")
         assert tree._original_path == "/tmp"
-        assert tree.sort_mode == SortMode.NAME
-        assert tree.sort_order == SortOrder.ASCENDING
+        assert tree.tree_sort_mode == SortMode.NAME
+        assert tree.tree_sort_order == SortOrder.ASCENDING
 
 
 class TestSelectFileFunction:
@@ -465,7 +465,7 @@ class TestSortDialogAdditional:
             for mode in sort_modes:
                 tree.set_sort_mode(mode)
                 await pilot.pause()
-                assert tree.sort_mode == mode
+                assert tree.tree_sort_mode == mode
 
                 # Verify tree is still functional
                 assert tree.root is not None
@@ -524,11 +524,11 @@ class TestSortDialogAdditional:
 
             # Test set_sort_mode
             tree.set_sort_mode(SortMode.SIZE)
-            assert tree.sort_mode == SortMode.SIZE
+            assert tree.tree_sort_mode == SortMode.SIZE
 
             # Test set_sort_order
             tree.set_sort_order(SortOrder.DESCENDING)
-            assert tree.sort_order == SortOrder.DESCENDING
+            assert tree.tree_sort_order == SortOrder.DESCENDING
 
     @pytest.mark.asyncio
     async def test_sort_dialog_no_selection(self):
@@ -646,7 +646,7 @@ class TestSortDialogAdditional:
 
             # Check that the tree's sort mode was updated
             tree = app.query_one(CustomDirectoryTree)
-            assert tree.sort_mode == SortMode.SIZE
+            assert tree.tree_sort_mode == SortMode.SIZE
 
     @pytest.mark.asyncio
     async def test_sort_dialog_action_submit_defaults(self):
@@ -682,7 +682,7 @@ class TestSortDialogAdditional:
             tree = app.query_one(CustomDirectoryTree)
 
             # Set an invalid sort mode by mocking
-            tree.sort_mode = 999  # Invalid sort mode
+            tree.tree_sort_mode = 999  # Invalid sort mode
 
             # Trigger sorting
             tree.refresh_sorting()

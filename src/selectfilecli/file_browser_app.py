@@ -262,7 +262,7 @@ class CustomDirectoryTree(DirectoryTree):
         else:
             node.expand()
             # Sort the newly loaded children
-            self.sort_children(node)
+            self.sort_children_by_mode(node)
         self.refresh()
 
 
