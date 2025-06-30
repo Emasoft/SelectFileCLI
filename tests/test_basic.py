@@ -19,12 +19,14 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 def test_import():
     """Test that the module can be imported."""
     from selectfilecli import select_file
+
     assert select_file is not None
 
 
 def test_api_exists():
     """Test that the select_file function exists."""
     from selectfilecli import select_file
+
     assert hasattr(select_file, "__call__"), "select_file is not callable"
 
 
@@ -32,7 +34,7 @@ def test_invalid_path():
     """Test that invalid path raises ValueError."""
     from selectfilecli import select_file
     import pytest
-    
+
     with pytest.raises(ValueError):
         select_file("/path/that/does/not/exist")
 
