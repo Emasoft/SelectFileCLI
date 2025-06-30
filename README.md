@@ -1,42 +1,95 @@
 # selectFileCLI
 
-[![Python Version](https://img.shields.io/pypi/pyversions/selectfilecli.svg)](https://pypi.org/project/selectfilecli/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![PyPI Version](https://img.shields.io/pypi/v/selectfilecli.svg)](https://pypi.org/project/selectfilecli/)
+<div align="center">
 
-A powerful file selection browser for CLI applications using the Textual TUI framework.
+[![GitHub CI](https://github.com/Emasoft/SelectFileCLI/actions/workflows/check.yml/badge.svg)](https://github.com/Emasoft/SelectFileCLI/actions/workflows/check.yml)
+[![Tests](https://github.com/Emasoft/SelectFileCLI/actions/workflows/test.yml/badge.svg)](https://github.com/Emasoft/SelectFileCLI/actions/workflows/test.yml)
+[![Lint](https://github.com/Emasoft/SelectFileCLI/actions/workflows/lint.yml/badge.svg)](https://github.com/Emasoft/SelectFileCLI/actions/workflows/lint.yml)
+[![Build](https://github.com/Emasoft/SelectFileCLI/actions/workflows/build.yml/badge.svg)](https://github.com/Emasoft/SelectFileCLI/actions/workflows/build.yml)
+[![codecov](https://codecov.io/gh/Emasoft/SelectFileCLI/branch/main/graph/badge.svg)](https://codecov.io/gh/Emasoft/SelectFileCLI)
+
+[![Python Version](https://img.shields.io/pypi/pyversions/selectfilecli.svg)](https://pypi.org/project/selectfilecli/)
+[![PyPI Version](https://img.shields.io/pypi/v/selectfilecli.svg)](https://pypi.org/project/selectfilecli/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Downloads](https://img.shields.io/pypi/dm/selectfilecli.svg)](https://pypi.org/project/selectfilecli/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+
+**A powerful and intuitive file selection browser for CLI applications using the Textual TUI framework**
 
 ![Demo](https://github.com/Emasoft/selectfilecli/assets/713559/demo.gif)
 
-## Features
+</div>
 
-- 🎨 Modern TUI with Textual framework
-- 📁 Intuitive file and directory navigation
-- 🔍 Advanced sorting options (Name, Date, Size, Extension)
-- ⌨️ Keyboard-driven interface
-- 🎯 Simple API - just one function call
-- 🖥️ Cross-platform support (Linux, macOS, Windows*)
-- 🎭 Full test coverage with snapshot testing
+---
 
-*Windows support coming soon
+> ⚠️ **EARLY ALPHA WARNING**: This project is in early alpha stage and is **NOT** ready for production use. APIs may change, and stability is not guaranteed. Use at your own risk!
 
-## Installation
+---
 
-Install from PyPI:
+## 📋 Table of Contents
+
+- [Features](#-features)
+- [Requirements](#-requirements)
+- [Installation](#-installation)
+- [Quick Start](#-quick-start)
+- [Usage Examples](#-usage-examples)
+- [Keyboard Controls](#️-keyboard-controls)
+- [Development](#-development)
+- [Contributing](#-contributing)
+- [License](#-license)
+- [Support](#-support)
+- [Acknowledgments](#-acknowledgments)
+
+## ✨ Features
+
+- 🎨 **Modern TUI** - Built with the powerful Textual framework for beautiful terminal interfaces
+- 📁 **Intuitive Navigation** - Easy file and directory browsing with keyboard controls
+- 🔍 **Advanced Sorting** - Multiple sort modes: Name, Date, Size, Extension
+- ⌨️ **Keyboard-Driven** - Fully accessible via keyboard with vim-style shortcuts
+- 🎯 **Simple API** - Just one function call: `select_file()`
+- 🖥️ **Cross-Platform** - Works on Linux, macOS, and Windows (experimental)
+- 🧪 **Well-Tested** - 93.92% test coverage with snapshot testing
+- 📦 **Zero Config** - Works out of the box, no configuration needed
+
+## 📋 Requirements
+
+- **Python**: 3.10 or higher
+- **Terminal**: Unicode support required
+- **OS**: Linux, macOS, or Windows (experimental)
+
+## 📦 Installation
+
+### From PyPI (Recommended)
 
 ```bash
 pip install selectfilecli
 ```
 
-Or install from source:
+### Using uv (Fast Python Package Manager)
 
 ```bash
-git clone https://github.com/Emasoft/selectfilecli.git
-cd selectfilecli
+uv pip install selectfilecli
+```
+
+### From Source
+
+```bash
+git clone https://github.com/Emasoft/SelectFileCLI.git
+cd SelectFileCLI
 pip install -e .
 ```
 
-## Quick Start
+### Development Installation
+
+```bash
+git clone https://github.com/Emasoft/SelectFileCLI.git
+cd SelectFileCLI
+uv venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+uv pip install -e ".[dev]"
+```
+
+## 🚀 Quick Start
 
 ```python
 from selectfilecli import select_file
@@ -50,7 +103,7 @@ else:
     print("No file selected")
 ```
 
-## Usage Examples
+## 📖 Usage Examples
 
 ### Basic File Selection
 
@@ -66,7 +119,7 @@ if selected_file:
         print(f"File content: {content[:100]}...")
 ```
 
-### Integration with CLI Tools
+### Integration with Click CLI
 
 ```python
 import click
@@ -89,45 +142,78 @@ if __name__ == '__main__':
     process_file()
 ```
 
-## Keyboard Controls
+### Configuration File Selector
 
-| Key | Action |
-|-----|--------|
-| `↑`/`↓` | Navigate files and directories |
-| `Enter` | Select file / Enter directory |
-| `S` | Open sort options dialog |
-| `Q` | Quit without selecting |
-| `Escape` | Cancel current operation |
+```python
+from pathlib import Path
+from selectfilecli import select_file
 
-### Sort Dialog
+def load_config():
+    config_dir = Path.home() / '.config' / 'myapp'
+    config_file = select_file(str(config_dir))
 
-When you press `S`, a modal dialog appears with sorting options:
+    if config_file and config_file.endswith('.json'):
+        import json
+        with open(config_file) as f:
+            return json.load(f)
+    else:
+        print("Please select a valid JSON config file")
+        return None
+```
 
-- **Sort by**: Name, Creation Date, Last Accessed, Last Modified, Size, Extension
-- **Order**: Ascending (↓) or Descending (↑)
+## ⌨️ Keyboard Controls
 
-Navigate with arrow keys, select with Enter, cancel with Escape.
+### Main Navigation
 
-## Requirements
+| Key | Action | Description |
+|-----|--------|-------------|
+| `↑` / `k` | Move up | Navigate to previous item |
+| `↓` / `j` | Move down | Navigate to next item |
+| `Enter` | Select / Open | Select file or enter directory |
+| `Backspace` | Go back | Navigate to parent directory |
+| `s` | Sort menu | Open sort options dialog |
+| `q` / `Ctrl+C` | Quit | Exit without selecting |
+| `Escape` | Cancel | Cancel current operation |
 
-- Python 3.10 or higher
-- Terminal with Unicode support
-- Operating System: Linux, macOS, or Windows (experimental)
+### Sort Dialog Controls
 
-## Development
+| Key | Action | Description |
+|-----|--------|-------------|
+| `↑` / `↓` | Navigate options | Move between sort modes |
+| `Space` | Toggle order | Switch between ascending/descending |
+| `Enter` | Apply sort | Apply selected sort mode |
+| `Escape` | Cancel | Close dialog without changes |
+
+### Available Sort Modes
+
+- **Name** - Alphabetical order
+- **Creation Date** - When file was created
+- **Last Accessed** - Most recently accessed files
+- **Last Modified** - Most recently modified files
+- **Size** - File size (largest/smallest first)
+- **Extension** - Group by file extension
+
+## 🛠️ Development
 
 ### Setup Development Environment
 
 ```bash
-# Install uv package manager
+# Install uv (recommended)
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# Clone and setup
-git clone https://github.com/Emasoft/selectfilecli.git
-cd selectfilecli
+# Clone repository
+git clone https://github.com/Emasoft/SelectFileCLI.git
+cd SelectFileCLI
+
+# Create virtual environment
 uv venv
-source .venv/bin/activate
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+
+# Install with dev dependencies
 uv pip install -e ".[dev]"
+
+# Install pre-commit hooks
+pre-commit install
 ```
 
 ### Running Tests
@@ -136,14 +222,17 @@ uv pip install -e ".[dev]"
 # Run all tests
 uv run pytest
 
-# Run with coverage
-uv run pytest --cov
+# Run with coverage report
+uv run pytest --cov=src/selectfilecli --cov-report=html
+
+# Run specific test file
+uv run pytest tests/test_file_browser_app.py
 
 # Update UI snapshots after changes
 uv run pytest --snapshot-update
 ```
 
-### Code Quality
+### Code Quality Tools
 
 ```bash
 # Format code
@@ -154,30 +243,64 @@ uv run ruff check --fix
 
 # Type checking
 uv run mypy src
+
+# Run all pre-commit hooks
+pre-commit run --all-files
 ```
 
-## License
+### Building & Publishing
+
+```bash
+# Build package
+uv build
+
+# Test locally
+pip install dist/*.whl
+
+# Publish to PyPI (requires credentials)
+uv publish
+```
+
+## 🤝 Contributing
+
+Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+
+### Quick Contribution Guide
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 Copyright (c) 2024 Emasoft
 
-## Acknowledgments
+## 💬 Support
 
-- Built with [Textual](https://github.com/Textualize/textual) - An amazing TUI framework for Python
-- Tested with [pytest-textual-snapshot](https://github.com/Textualize/pytest-textual-snapshot) - Snapshot testing for Textual apps
-- Linted with [Ruff](https://github.com/astral-sh/ruff) - An extremely fast Python linter
+- 🐛 **Report Bugs**: [GitHub Issues](https://github.com/Emasoft/SelectFileCLI/issues)
+- 💡 **Request Features**: [Feature Requests](https://github.com/Emasoft/SelectFileCLI/issues/new?labels=enhancement)
+- 💬 **Discussions**: [GitHub Discussions](https://github.com/Emasoft/SelectFileCLI/discussions)
+- 📧 **Contact**: 713559+Emasoft@users.noreply.github.com
 
-## Contributing
+## 🙏 Acknowledgments
 
-Contributions are welcome! Please see our [Contributing Guide](CONTRIBUTING.md) for details.
+Special thanks to these amazing projects:
 
-## Changelog
+- [**Textual**](https://github.com/Textualize/textual) - The incredible TUI framework that powers this project
+- [**pytest-textual-snapshot**](https://github.com/Textualize/pytest-textual-snapshot) - Snapshot testing for Textual apps
+- [**Ruff**](https://github.com/astral-sh/ruff) - Lightning-fast Python linter
+- [**uv**](https://github.com/astral-sh/uv) - Blazingly fast Python package manager
 
-See [CHANGELOG.md](CHANGELOG.md) for a list of changes in each release.
+---
 
-## Support
+<div align="center">
 
-- 📫 Report issues on [GitHub Issues](https://github.com/Emasoft/selectfilecli/issues)
-- 💬 Ask questions in [Discussions](https://github.com/Emasoft/selectfilecli/discussions)
-- 📧 Contact: 713559+Emasoft@users.noreply.github.com
+**Made with ❤️ by [Emasoft](https://github.com/Emasoft)**
+
+⭐ Star this repository if you find it useful!
+
+</div>
