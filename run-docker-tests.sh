@@ -35,17 +35,17 @@ print_status() {
 # Function to cleanup Docker resources
 cleanup_docker() {
     print_status "$YELLOW" "Cleaning up Docker resources..."
-    
+
     # Stop and remove containers
     docker-compose --profile "$PROFILE" down -v 2>/dev/null || true
     docker-compose -f docker-compose.ci.yml down -v 2>/dev/null || true
-    
+
     # Remove dangling images
     docker image prune -f
-    
+
     # Clean build cache (optional, commented out by default)
     # docker builder prune -f
-    
+
     print_status "$GREEN" "Docker cleanup completed!"
 }
 
@@ -57,38 +57,38 @@ main() {
     print_status "$BLUE" "=== SelectFileCLI Docker Testing ==="
     print_status "$BLUE" "Profile: $PROFILE"
     echo
-    
+
     case "$PROFILE" in
         test)
             print_status "$YELLOW" "Running tests in Docker..."
             docker-compose --profile test up --build --abort-on-container-exit
             ;;
-        
+
         lint)
             print_status "$YELLOW" "Running linters in Docker..."
             docker-compose --profile lint up --build --abort-on-container-exit
             ;;
-        
+
         build)
             print_status "$YELLOW" "Building package in Docker..."
             docker-compose --profile build up --build --abort-on-container-exit
             ;;
-        
+
         prod)
             print_status "$YELLOW" "Testing production image..."
             docker-compose --profile prod up --build --abort-on-container-exit
             ;;
-        
+
         dev)
             print_status "$YELLOW" "Starting development shell..."
             docker-compose --profile dev run --rm dev
             ;;
-        
+
         ci)
             print_status "$YELLOW" "Running CI tests..."
             docker-compose -f docker-compose.ci.yml up --build test-ci lint-ci build-ci --abort-on-container-exit
             ;;
-        
+
         all)
             print_status "$YELLOW" "Running all tests..."
             for p in test lint build prod; do
@@ -96,19 +96,19 @@ main() {
                 docker-compose --profile "$p" up --build --abort-on-container-exit
             done
             ;;
-        
+
         clean)
             # Just run cleanup
             exit 0
             ;;
-        
+
         *)
             print_status "$RED" "Unknown profile: $PROFILE"
             echo "Usage: $0 [test|lint|build|prod|dev|ci|all|clean]"
             exit 1
             ;;
     esac
-    
+
     print_status "$GREEN" "✅ Docker tests completed successfully!"
 }
 

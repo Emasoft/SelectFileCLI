@@ -35,9 +35,9 @@ services:
       - TERM=xterm-256color
     command: >
       uv run pytest
-      --cov=src/selectfilecli 
-      --cov-report=term-missing 
-      --cov-report=xml 
+      --cov=src/selectfilecli
+      --cov-report=term-missing
+      --cov-report=xml
       --cov-fail-under=80
       --no-cov-on-fail
       -v

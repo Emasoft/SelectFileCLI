@@ -81,7 +81,7 @@ def process_file(input_file):
         if not input_file:
             click.echo("No file selected.")
             return
-    
+
     click.echo(f"Processing: {input_file}")
     # Your processing logic here
 

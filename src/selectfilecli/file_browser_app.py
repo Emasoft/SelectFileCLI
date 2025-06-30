@@ -60,7 +60,7 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
     SortDialog {
         align: center middle;
     }
-    
+
     SortDialog > Container {
         background: $surface;
         width: 40;
@@ -68,18 +68,18 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
         border: thick $primary;
         padding: 1 2;
     }
-    
+
     SortDialog RadioSet {
         width: 100%;
         height: auto;
         margin: 1 0;
     }
-    
+
     SortDialog Label {
         margin: 1 0;
         width: 100%;
     }
-    
+
     SortDialog .title {
         text-style: bold;
         margin-bottom: 1;
@@ -261,7 +261,7 @@ class FileBrowserApp(App[Optional[str]]):
         border: solid $primary;
         height: 100%;
     }
-    
+
     #path-display {
         background: $surface;
         color: $text-muted;

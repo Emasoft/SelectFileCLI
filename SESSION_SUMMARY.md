@@ -169,7 +169,7 @@ No dependency changes - Textual and all other dependencies remained the same
   Docstring: "Test that the sort dialog opens when pressing 's'"
   Motivation: Verify new dialog-based UI responds to keyboard shortcut
 
-• test_sort_dialog_selection (line 240) 
+• test_sort_dialog_selection (line 240)
   Docstring: "Test selecting sort options in the dialog"
   Motivation: Ensure dialog interaction and state updates work correctly
 

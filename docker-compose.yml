@@ -41,9 +41,9 @@ services:
       sh -c "
       cd /app &&
       python -m pytest
-      --cov=src/selectfilecli 
-      --cov-report=term-missing 
-      --cov-report=xml 
+      --cov=src/selectfilecli
+      --cov-report=term-missing
+      --cov-report=xml
       --cov-fail-under=80
       -v
       "

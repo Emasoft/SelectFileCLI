@@ -57,7 +57,7 @@ fi
 # Show coverage if available
 echo -e "${BLUE}Coverage Report:${NC}"
 docker run --rm -v $(pwd):/work:ro -w /tmp -e PYTHONPATH=/work/src selectfilecli:test bash -c "
-cp -r /work/tests /tmp/ && 
+cp -r /work/tests /tmp/ &&
 cp -r /work/src /tmp/ &&
 python -m pytest /tmp/tests/ --cov=/tmp/src/selectfilecli --cov-report=term-missing --no-header -q 2>/dev/null | grep -E '(TOTAL|selectfilecli)' || echo 'Coverage calculation failed in Docker environment'
 "

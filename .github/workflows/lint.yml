@@ -1,42 +1,33 @@
 name: Lint
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
-
+    branches: [main]
 jobs:
   lint:
     runs-on: ubuntu-latest
     strategy:
       matrix:
         python-version: ["3.10", "3.11", "3.12"]
-
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        enable-cache: true
-        cache-dependency-glob: "uv.lock"
-
-    - name: Set up Python ${{ matrix.python-version }}
-      run: uv python install ${{ matrix.python-version }}
-
-    - name: Install dependencies
-      run: |
-        uv sync --all-extras --dev
-
-    - name: Lint with ruff
-      run: |
-        uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
-
-    - name: Format check with ruff
-      run: |
-        uv run ruff format --check --line-length=320
-
-    - name: Type check with mypy
-      run: |
-        uv run mypy --install-types --non-interactive src/selectfilecli || true
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python ${{ matrix.python-version }}
+        run: uv python install ${{ matrix.python-version }}
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras --dev
+      - name: Lint with ruff
+        run: |
+          uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
+      - name: Format check with ruff
+        run: |
+          uv run ruff format --check --line-length=320
+      - name: Type check with mypy
+        run: |
+          uv run mypy --install-types --non-interactive src/selectfilecli || true

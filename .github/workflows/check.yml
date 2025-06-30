@@ -1,41 +1,32 @@
 name: Check
-
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
-
+    branches: [main]
 jobs:
   check:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Install uv
-      uses: astral-sh/setup-uv@v3
-      with:
-        enable-cache: true
-        cache-dependency-glob: "uv.lock"
-
-    - name: Set up Python
-      run: uv python install 3.12
-
-    - name: Install dependencies
-      run: |
-        uv sync --all-extras --dev
-
-    - name: Run lint workflow
-      run: |
-        uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
-        uv run ruff format --check --line-length=320
-
-    - name: Run tests
-      run: |
-        uv run pytest --cov=src/selectfilecli --cov-report=term-missing --cov-fail-under=80
-
-    - name: Security check with gitleaks
-      uses: gitleaks/gitleaks-action@v2
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+      - name: Set up Python
+        run: uv python install 3.12
+      - name: Install dependencies
+        run: |
+          uv sync --all-extras --dev
+      - name: Run lint workflow
+        run: |
+          uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
+          uv run ruff format --check --line-length=320
+      - name: Run tests
+        run: |
+          uv run pytest --cov=src/selectfilecli --cov-report=term-missing --cov-fail-under=80
+      - name: Security check with gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -53,12 +53,12 @@ main() {
 
     local bump_type=$1
     local current_version=$(get_current_version)
-    
+
     echo -e "${BLUE}Current version: ${current_version}${NC}"
-    
+
     # Parse current version
     read -r major minor patch <<< $(parse_version "$current_version")
-    
+
     # Calculate new version
     case "$bump_type" in
         major)
@@ -78,10 +78,10 @@ main() {
             usage
             ;;
     esac
-    
+
     local new_version="${major}.${minor}.${patch}"
     echo -e "${GREEN}New version: ${new_version}${NC}"
-    
+
     # Update pyproject.toml
     if [[ "$OSTYPE" == "darwin"* ]]; then
         # macOS
@@ -90,7 +90,7 @@ main() {
         # Linux
         sed -i "s/^version = \".*\"/version = \"${new_version}\"/" pyproject.toml
     fi
-    
+
     echo -e "${GREEN}✅ Version updated in pyproject.toml${NC}"
     echo ""
     echo -e "${YELLOW}Next steps:${NC}"

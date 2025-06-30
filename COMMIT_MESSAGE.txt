@@ -14,7 +14,7 @@ BREAKING CHANGE: Removed individual sort shortcuts (n/d/z/e/o). Users must
 now access all sorting options through the unified sort dialog.
 
 - Add SortDialog modal with RadioSet widgets for sort selection
-- Support sort modes: Name, Creation, Accessed, Modified, Size, Extension  
+- Support sort modes: Name, Creation, Accessed, Modified, Size, Extension
 - Show sort order with visual arrows (Ascending ↓ / Descending ↑)
 - Fix CustomDirectoryTree to handle DirEntry objects correctly
 - Remove cycling sort mode and individual keyboard shortcuts

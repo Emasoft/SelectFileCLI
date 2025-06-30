@@ -1,6 +1,6 @@
 [run]
 source = src/selectfilecli
-omit = 
+omit =
     */FileList.py
     */fileBrowser.py
     */tests/*
@@ -17,6 +17,6 @@ exclude_lines =
     if __name__ == .__main__.:
     if TYPE_CHECKING:
     @abstractmethod
-    
+
 [html]
 directory = htmlcov
