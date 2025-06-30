@@ -1,0 +1,23 @@
+# Gitleaks ignore file
+# Add commit SHAs or file:line patterns to ignore false positives
+
+# Example patterns:
+# commit-sha:filename:line-number
+# commit-sha:filename
+# filename:line-number
+# filename
+
+# Ignore test files that might contain mock secrets
+tests/test_*.py
+*_test.py
+test_*.py
+
+# Ignore documentation files with example API keys
+*.md:*example*
+*.md:*sample*
+*.md:*demo*
+
+# Ignore snapshot files that might contain test data
+*.svg
+snapshot_report.html
+__snapshots__/
