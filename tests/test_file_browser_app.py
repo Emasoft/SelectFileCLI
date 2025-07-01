@@ -776,6 +776,52 @@ class TestSortDialogAdditional:
             assert app.current_path == app.start_path
 
     @pytest.mark.asyncio
+    async def test_file_size_formatting(self):
+        """Test human-readable file size formatting."""
+        app = FileBrowserApp()
+
+        async with app.run_test() as pilot:
+            tree = app.query_one(CustomDirectoryTree)
+
+            # Test various file sizes
+            assert tree.format_file_size(0) == "0 B"
+            assert tree.format_file_size(500) == "500 B"
+            assert tree.format_file_size(1023) == "1023 B"
+            assert tree.format_file_size(1024) == "1.0 KB"
+            assert tree.format_file_size(1536) == "1.5 KB"
+            assert tree.format_file_size(1048576) == "1.0 MB"
+            assert tree.format_file_size(1073741824) == "1.0 GB"
+            assert tree.format_file_size(1099511627776) == "1.0 TB"
+
+    @pytest.mark.asyncio
+    async def test_date_formatting(self):
+        """Test date formatting for different time ranges."""
+        app = FileBrowserApp()
+
+        async with app.run_test() as pilot:
+            tree = app.query_one(CustomDirectoryTree)
+
+            # Test with various timestamps
+            import time
+            from datetime import datetime, timedelta
+
+            # Today's date
+            today = datetime.now()
+            today_timestamp = today.timestamp()
+            today_str = tree.format_date(today_timestamp)
+            assert ":" in today_str and ("AM" in today_str or "PM" in today_str)
+
+            # This year but not today
+            this_year = today - timedelta(days=30)
+            this_year_str = tree.format_date(this_year.timestamp())
+            assert len(this_year_str.split()) == 2  # "Mon DD" format
+
+            # Previous year
+            last_year = today - timedelta(days=400)
+            last_year_str = tree.format_date(last_year.timestamp())
+            assert last_year_str.isdigit() and len(last_year_str) == 4  # "YYYY" format
+
+    @pytest.mark.asyncio
     async def test_populate_node_attribute_error(self):
         """Test _populate_node AttributeError handling."""
         app = FileBrowserApp()

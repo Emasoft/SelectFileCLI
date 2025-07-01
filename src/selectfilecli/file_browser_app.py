@@ -21,12 +21,19 @@
 # - Add root/drive navigation with Root button
 # - Support Windows drive navigation
 # - Dynamically recreate DirectoryTree when changing directories
+# - Add file information display: size, modification date, permissions
+# - Show human-readable file sizes (KB, MB, GB)
+# - Add lock emoji 🔒 for read-only files
+# - Add link emoji 🔗 for symlinks
+# - Smart date formatting (time for today, month/day for this year, year otherwise)
 #
 
 """Textual-based file browser application."""
 
 import os
 import platform
+import stat
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Tuple
 from enum import Enum
@@ -39,6 +46,7 @@ from textual.widgets._directory_tree import DirectoryTree
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
+from rich.text import Text
 
 
 class SortMode(Enum):
@@ -175,7 +183,7 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 
 
 class CustomDirectoryTree(DirectoryTree):
-    """Extended DirectoryTree with sorting capabilities."""
+    """Extended DirectoryTree with sorting capabilities and file info display."""
 
     tree_sort_mode = reactive(SortMode.NAME)
     tree_sort_order = reactive(SortOrder.ASCENDING)
@@ -183,6 +191,84 @@ class CustomDirectoryTree(DirectoryTree):
     def __init__(self, path: str, **kwargs: Any) -> None:
         super().__init__(path, **kwargs)
         self._original_path = path
+
+    def format_file_size(self, size: int) -> str:
+        """Format file size in human-readable format."""
+        size_float = float(size)
+        for unit in ["B", "KB", "MB", "GB", "TB"]:
+            if size_float < 1024.0:
+                if unit == "B":
+                    return f"{int(size_float)} {unit}"
+                return f"{size_float:.1f} {unit}"
+            size_float /= 1024.0
+        return f"{size_float:.1f} PB"
+
+    def format_date(self, timestamp: float) -> str:
+        """Format timestamp as readable date."""
+        dt = datetime.fromtimestamp(timestamp)
+        now = datetime.now()
+
+        # If today, show time only
+        if dt.date() == now.date():
+            return dt.strftime("%I:%M %p")
+        # If this year, show month and day
+        elif dt.year == now.year:
+            return dt.strftime("%b %d")
+        # Otherwise show year
+        else:
+            return dt.strftime("%Y")
+
+    def render_label(self, node: Any, base_style: Any, style: Any) -> Text:
+        """Render node label with additional file information."""
+        # Get the default label
+        label = super().render_label(node, base_style, style)
+
+        # Skip if this is the root node or no data
+        if not node.data or node.parent is None:
+            return label
+
+        try:
+            # Get path from node data
+            if hasattr(node.data, "path"):
+                file_path = Path(node.data.path)
+            else:
+                file_path = Path(str(node.data))
+
+            # Get file stats
+            try:
+                file_stat = file_path.lstat()  # Use lstat to not follow symlinks
+                is_symlink = file_path.is_symlink()
+            except (OSError, PermissionError):
+                return label
+
+            # Create new label with file info
+            new_label = Text()
+
+            # Add original label (file/folder name)
+            new_label.append(file_path.name)
+
+            # Add symlink indicator
+            if is_symlink:
+                new_label.append(" 🔗", style="cyan")
+
+            # Add lock icon for read-only files
+            if not os.access(file_path, os.W_OK):
+                new_label.append(" 🔒", style="red")
+
+            # Add file size for regular files
+            if file_path.is_file() and not is_symlink:
+                size_str = self.format_file_size(file_stat.st_size)
+                new_label.append(f"  {size_str}", style="dim cyan")
+
+            # Add modification date
+            date_str = self.format_date(file_stat.st_mtime)
+            new_label.append(f"  {date_str}", style="dim yellow")
+
+            return new_label
+
+        except Exception:
+            # If anything goes wrong, return the original label
+            return label
 
     def sort_children_by_mode(self, node: Any) -> None:
         """Sort children of a node based on current sort settings."""
