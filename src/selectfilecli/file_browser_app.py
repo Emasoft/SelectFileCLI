@@ -16,11 +16,17 @@
 # - Sorting controls in footer
 # - Use Textual reactive attributes for sort mode and order
 # - Add watchers to automatically refresh when sort settings change
+# - Add parent directory navigation with Up button and 'u'/'backspace' keys
+# - Add home directory navigation with Home button and 'h' key
+# - Add root/drive navigation with Root button
+# - Support Windows drive navigation
+# - Dynamically recreate DirectoryTree when changing directories
 #
 
 """Textual-based file browser application."""
 
 import os
+import platform
 from pathlib import Path
 from typing import Optional, Any, Tuple
 from enum import Enum
@@ -28,10 +34,10 @@ from enum import Enum
 from textual import on
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
-from textual.widgets import Header, Footer, Label, RadioButton, RadioSet
+from textual.widgets import Header, Footer, Label, RadioButton, RadioSet, Button
 from textual.widgets._directory_tree import DirectoryTree
 from textual.binding import Binding
-from textual.containers import Container
+from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 
 
@@ -294,12 +300,26 @@ class FileBrowserApp(App[Optional[str]]):
         height: 1;
         dock: top;
     }
+
+    #navigation-bar {
+        dock: top;
+        height: 3;
+        background: $boost;
+        padding: 0 1;
+    }
+
+    #navigation-bar Button {
+        margin: 0 1;
+    }
     """
 
     BINDINGS = [
         Binding("q", "quit", "Quit", priority=True),
         Binding("escape", "quit", "Quit"),
         Binding("s", "show_sort_dialog", "Sort", show=True),
+        Binding("u", "go_parent", "Up", show=True),
+        Binding("backspace", "go_parent", "Parent"),
+        Binding("h", "go_home", "Home", show=True),
     ]
 
     def __init__(self, start_path: str = "."):
@@ -313,12 +333,18 @@ class FileBrowserApp(App[Optional[str]]):
         self.selected_file: Optional[str] = None
         self.current_sort_mode = SortMode.NAME
         self.current_sort_order = SortOrder.ASCENDING
+        self.current_path = self.start_path
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
+        with Horizontal(id="navigation-bar"):
+            yield Button("↑ Parent", id="parent-button", variant="primary")
+            yield Button("⌂ Home", id="home-button", variant="default")
+            yield Button("/ Root", id="root-button", variant="default")
         yield Label("", id="path-display")
-        yield CustomDirectoryTree(str(self.start_path))
+        with Vertical(id="tree-container"):
+            yield CustomDirectoryTree(str(self.start_path), id="directory-tree")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -327,7 +353,7 @@ class FileBrowserApp(App[Optional[str]]):
         self.sub_title = "Navigate with arrows, Enter to select, Q to quit"
 
         # Set initial focus to directory tree
-        tree = self.query_one(CustomDirectoryTree)
+        tree = self.query_one("#directory-tree", CustomDirectoryTree)
         tree.focus()
 
         # Update path display for root
@@ -368,6 +394,64 @@ class FileBrowserApp(App[Optional[str]]):
             self.current_sort_mode, self.current_sort_order = result
 
             # Update the tree's sort settings
-            tree = self.query_one(CustomDirectoryTree)
+            tree = self.query_one("#directory-tree", CustomDirectoryTree)
             tree.set_sort_mode(self.current_sort_mode)
             tree.set_sort_order(self.current_sort_order)
+
+    async def action_go_parent(self) -> None:
+        """Navigate to parent directory."""
+        parent = self.current_path.parent
+        if parent != self.current_path:  # Check we're not already at root
+            await self._change_directory(parent)
+
+    async def action_go_home(self) -> None:
+        """Navigate to home directory."""
+        home = Path.home()
+        await self._change_directory(home)
+
+    @on(Button.Pressed, "#parent-button")
+    async def on_parent_button(self) -> None:
+        """Handle parent button click."""
+        await self.action_go_parent()
+
+    @on(Button.Pressed, "#home-button")
+    async def on_home_button(self) -> None:
+        """Handle home button click."""
+        await self.action_go_home()
+
+    @on(Button.Pressed, "#root-button")
+    async def on_root_button(self) -> None:
+        """Handle root button click."""
+        # Get system root(s)
+        if platform.system() == "Windows":
+            # On Windows, try to find available drives
+            for drive_letter in "CDEFGHIJKLMNOPQRSTUVWXYZAB":
+                drive_path = Path(f"{drive_letter}:\\")
+                if drive_path.exists():
+                    await self._change_directory(drive_path)
+                    break
+        else:  # Unix-like
+            await self._change_directory(Path("/"))
+
+    async def _change_directory(self, new_path: Path) -> None:
+        """Change the current directory and refresh the tree."""
+        if not new_path.exists() or not new_path.is_dir():
+            return
+
+        self.current_path = new_path
+
+        # Remove old tree and create new one
+        container = self.query_one("#tree-container")
+        await container.query_one(CustomDirectoryTree).remove()
+
+        # Create new tree with updated path
+        new_tree = CustomDirectoryTree(str(self.current_path), id="directory-tree")
+        new_tree.tree_sort_mode = self.current_sort_mode
+        new_tree.tree_sort_order = self.current_sort_order
+        await container.mount(new_tree)
+
+        # Focus the new tree
+        new_tree.focus()
+
+        # Update path display
+        self._update_path_display(str(self.current_path))

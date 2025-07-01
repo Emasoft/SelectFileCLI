@@ -691,6 +691,91 @@ class TestSortDialogAdditional:
             assert True
 
     @pytest.mark.asyncio
+    async def test_parent_navigation(self):
+        """Test navigating to parent directory."""
+        # Start from a subdirectory
+        test_subdir = Path.cwd() / "tests"
+        app = FileBrowserApp(str(test_subdir))
+
+        async with app.run_test() as pilot:
+            # Initial path should be the subdirectory
+            assert app.current_path == test_subdir.resolve()
+
+            # Navigate to parent
+            await pilot.press("u")
+            await pilot.pause(0.5)  # Give time for async operations
+
+            # Should be in parent directory now
+            assert app.current_path == test_subdir.parent.resolve()
+
+    @pytest.mark.asyncio
+    async def test_home_navigation(self):
+        """Test navigating to home directory."""
+        app = FileBrowserApp()
+
+        async with app.run_test() as pilot:
+            # Navigate to home
+            await pilot.press("h")
+            await pilot.pause(0.5)  # Give time for async operations
+
+            # Should be in home directory
+            assert app.current_path == Path.home()
+
+    @pytest.mark.asyncio
+    async def test_navigation_buttons(self):
+        """Test navigation button clicks."""
+        test_subdir = Path.cwd() / "tests"
+        app = FileBrowserApp(str(test_subdir))
+
+        async with app.run_test() as pilot:
+            # Initial state
+            initial_path = app.current_path
+            assert initial_path == test_subdir.resolve()
+
+            # Click parent button
+            parent_button = app.query_one("#parent-button")
+            await pilot.click(parent_button)
+            await pilot.pause(1.0)  # Give more time for async operations
+
+            # Check if path changed
+            expected_parent = test_subdir.parent.resolve()
+            actual_path = app.current_path
+            assert actual_path == expected_parent, f"Expected {expected_parent}, got {actual_path}"
+
+            # Click home button
+            home_button = app.query_one("#home-button")
+            await pilot.click(home_button)
+            await pilot.pause(1.0)  # Give more time for async operations
+
+            assert app.current_path == Path.home()
+
+    @pytest.mark.asyncio
+    async def test_backspace_parent_navigation(self):
+        """Test using backspace to navigate to parent."""
+        test_subdir = Path.cwd() / "tests"
+        app = FileBrowserApp(str(test_subdir))
+
+        async with app.run_test() as pilot:
+            # Press backspace
+            await pilot.press("backspace")
+            await pilot.pause(0.5)  # Give time for async operations
+
+            # Should be in parent directory
+            assert app.current_path == test_subdir.parent.resolve()
+
+    @pytest.mark.asyncio
+    async def test_change_directory_invalid_path(self):
+        """Test _change_directory with invalid path."""
+        app = FileBrowserApp()
+
+        async with app.run_test() as pilot:
+            # Try to change to non-existent directory
+            await app._change_directory(Path("/this/does/not/exist"))
+
+            # Should remain in original directory
+            assert app.current_path == app.start_path
+
+    @pytest.mark.asyncio
     async def test_populate_node_attribute_error(self):
         """Test _populate_node AttributeError handling."""
         app = FileBrowserApp()
