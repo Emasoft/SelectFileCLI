@@ -44,3 +44,13 @@ repos:
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
         pass_filenames: true
+
+  # TruffleHog secret detection
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.63.5
+    hooks:
+      - id: trufflehog
+        name: TruffleHog
+        entry: trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        language: golang
+        pass_filenames: false
