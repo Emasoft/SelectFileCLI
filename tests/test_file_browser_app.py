@@ -17,6 +17,8 @@ import time
 import pytest
 from textual.pilot import Pilot
 from textual.widgets import RadioSet, RadioButton
+from textual.widgets._directory_tree import DirectoryTree
+from rich.text import Text
 
 from selectfilecli.file_browser_app import FileBrowserApp, SortMode, SortOrder, CustomDirectoryTree, SortDialog
 
@@ -820,6 +822,245 @@ class TestSortDialogAdditional:
             last_year = today - timedelta(days=400)
             last_year_str = tree.format_date(last_year.timestamp())
             assert last_year_str.isdigit() and len(last_year_str) == 4  # "YYYY" format
+
+    @pytest.mark.asyncio
+    async def test_render_label_with_file_info(self):
+        """Test render_label displays file information correctly."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create test files
+            regular_file = test_dir / "test.txt"
+            regular_file.write_text("Hello world")
+
+            # Create a larger file
+            large_file = test_dir / "large.bin"
+            large_file.write_bytes(b"x" * 5242880)  # 5MB
+
+            app = FileBrowserApp(str(test_dir))
+
+            async with app.run_test() as pilot:
+                tree = app.query_one(CustomDirectoryTree)
+
+                # Create a mock node for testing
+                from unittest.mock import Mock
+
+                # Test regular file
+                node = Mock()
+                node.data = Mock(path=str(regular_file))
+                node.parent = Mock()  # Not None
+
+                # Mock base styles to avoid None error
+                from rich.style import Style
+
+                base_style = Style()
+                style = Style()
+
+                # We need to mock the super().render_label call
+                with patch.object(DirectoryTree, "render_label", return_value=Text("test.txt")):
+                    label = tree.render_label(node, base_style, style)
+                    label_text = label.plain
+
+                # Should contain filename
+                assert "test.txt" in label_text
+                # Should contain file size
+                assert "11 B" in label_text  # "Hello world" is 11 bytes
+                # Should not have symlink emoji
+                assert "🔗" not in label_text
+
+                # Test large file
+                node_large = Mock()
+                node_large.data = Mock(path=str(large_file))
+                node_large.parent = Mock()
+
+                with patch.object(DirectoryTree, "render_label", return_value=Text("large.bin")):
+                    label_large = tree.render_label(node_large, base_style, style)
+                    label_large_text = label_large.plain
+
+                # Should contain filename and size
+                assert "large.bin" in label_large_text
+                assert "5.0 MB" in label_large_text
+
+    @pytest.mark.asyncio
+    async def test_render_label_symlink(self):
+        """Test render_label shows symlink emoji."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create target and symlink
+            target = test_dir / "target.txt"
+            target.write_text("Target content")
+            symlink = test_dir / "link.txt"
+            symlink.symlink_to(target)
+
+            app = FileBrowserApp(str(test_dir))
+
+            async with app.run_test() as pilot:
+                tree = app.query_one(CustomDirectoryTree)
+
+                # Create mock node for symlink
+                from unittest.mock import Mock
+                from rich.style import Style
+
+                node = Mock()
+                node.data = Mock(path=str(symlink))
+                node.parent = Mock()
+                base_style = Style()
+                style = Style()
+
+                with patch.object(DirectoryTree, "render_label", return_value=Text("link.txt")):
+                    label = tree.render_label(node, base_style, style)
+                    label_text = label.plain
+
+                # Should contain symlink emoji
+                assert "🔗" in label_text
+                assert "link.txt" in label_text
+
+    @pytest.mark.asyncio
+    async def test_render_label_readonly(self):
+        """Test render_label shows lock emoji for read-only files."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create read-only file
+            readonly_file = test_dir / "readonly.txt"
+            readonly_file.write_text("Read only")
+            readonly_file.chmod(0o444)  # Read-only
+
+            app = FileBrowserApp(str(test_dir))
+
+            async with app.run_test() as pilot:
+                tree = app.query_one(CustomDirectoryTree)
+
+                # Create mock node
+                from unittest.mock import Mock
+                from rich.style import Style
+
+                node = Mock()
+                node.data = Mock(path=str(readonly_file))
+                node.parent = Mock()
+                base_style = Style()
+                style = Style()
+
+                with patch.object(DirectoryTree, "render_label", return_value=Text("readonly.txt")):
+                    label = tree.render_label(node, base_style, style)
+                    label_text = label.plain
+
+                # Should contain lock emoji
+                assert "🔒" in label_text
+                assert "readonly.txt" in label_text
+
+                # Restore permissions for cleanup
+                readonly_file.chmod(0o644)
+
+    @pytest.mark.asyncio
+    async def test_render_label_directory(self):
+        """Test render_label for directories (no file size shown)."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create subdirectory
+            subdir = test_dir / "subdir"
+            subdir.mkdir()
+
+            app = FileBrowserApp(str(test_dir))
+
+            async with app.run_test() as pilot:
+                tree = app.query_one(CustomDirectoryTree)
+
+                # Create mock node
+                from unittest.mock import Mock
+                from rich.style import Style
+
+                node = Mock()
+                node.data = Mock(path=str(subdir))
+                node.parent = Mock()
+                base_style = Style()
+                style = Style()
+
+                with patch.object(DirectoryTree, "render_label", return_value=Text("subdir")):
+                    label = tree.render_label(node, base_style, style)
+                    label_text = label.plain
+
+                # Should contain directory name
+                assert "subdir" in label_text
+                # Should NOT contain file size (directories don't show size)
+                assert " B" not in label_text and " KB" not in label_text
+
+    @pytest.mark.asyncio
+    async def test_render_label_permission_error(self):
+        """Test render_label handles permission errors gracefully."""
+        app = FileBrowserApp()
+
+        async with app.run_test() as pilot:
+            tree = app.query_one(CustomDirectoryTree)
+
+            # Create mock node with path that will cause permission error
+            from unittest.mock import Mock
+
+            node = Mock()
+            node.data = Mock(path="/root/inaccessible")  # Path we can't access
+            node.parent = Mock()
+
+            # Mock the super().render_label to return a simple label
+            original_label = Mock()
+            original_label.plain = "inaccessible"
+
+            with patch.object(DirectoryTree, "render_label", return_value=original_label):
+                label = tree.render_label(node, None, None)
+
+                # Should return original label on error
+                assert label == original_label
+
+    @pytest.mark.asyncio
+    async def test_render_label_no_data(self):
+        """Test render_label handles nodes without data."""
+        app = FileBrowserApp()
+
+        async with app.run_test() as pilot:
+            tree = app.query_one(CustomDirectoryTree)
+
+            # Create mock node without data
+            from unittest.mock import Mock
+
+            node = Mock()
+            node.data = None
+            node.parent = Mock()
+
+            # Mock the super().render_label
+            original_label = Mock()
+            original_label.plain = "no data"
+
+            with patch.object(DirectoryTree, "render_label", return_value=original_label):
+                label = tree.render_label(node, None, None)
+
+                # Should return original label
+                assert label == original_label
+
+    @pytest.mark.asyncio
+    async def test_render_label_root_node(self):
+        """Test render_label handles root nodes."""
+        app = FileBrowserApp()
+
+        async with app.run_test() as pilot:
+            tree = app.query_one(CustomDirectoryTree)
+
+            # Create mock root node (no parent)
+            from unittest.mock import Mock
+
+            node = Mock()
+            node.data = Mock(path="/some/path")
+            node.parent = None  # Root node
+
+            # Mock the super().render_label
+            original_label = Mock()
+            original_label.plain = "root"
+
+            with patch.object(DirectoryTree, "render_label", return_value=original_label):
+                label = tree.render_label(node, None, None)
+
+                # Should return original label for root
+                assert label == original_label
 
     @pytest.mark.asyncio
     async def test_populate_node_attribute_error(self):
