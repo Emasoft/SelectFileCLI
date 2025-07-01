@@ -24,6 +24,13 @@ repos:
         types: [python]
         pass_filenames: true
 
+      - id: deptry
+        name: Check dependencies with deptry
+        entry: uv run deptry src
+        language: system
+        types: [python]
+        pass_filenames: false
+
   # Check for trailing whitespace
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -35,7 +42,7 @@ repos:
       - id: check-added-large-files
         args: ['--maxkb=1000']
 
-  # YAML formatting for GitHub workflows
+  # YAML formatting and linting
   - repo: local
     hooks:
       - id: yamlfmt
@@ -43,6 +50,20 @@ repos:
         entry: yamlfmt
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
+        pass_filenames: true
+
+      - id: yamllint
+        name: Lint YAML files
+        entry: uv run yamllint
+        language: system
+        types: [yaml]
+        pass_filenames: true
+
+      - id: actionlint
+        name: Lint GitHub Actions workflows
+        entry: actionlint
+        language: system
+        files: '^\.github/workflows/.*\.(yml|yaml)$'
         pass_filenames: true
 
   # TruffleHog secret detection

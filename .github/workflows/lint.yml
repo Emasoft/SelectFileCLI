@@ -19,6 +19,16 @@ jobs:
       - name: Install dependencies
         run: |
           uv sync --all-extras --dev
+      - name: Install actionlint
+        run: |
+          curl -s https://api.github.com/repos/rhysd/actionlint/releases/latest | \
+          grep '"browser_download_url"' | \
+          grep 'linux_amd64' | \
+          cut -d'"' -f4 | \
+          wget -qi -
+          tar -xzf actionlint_*_linux_amd64.tar.gz actionlint
+          chmod +x actionlint
+          sudo mv actionlint /usr/local/bin/
       - name: Lint with ruff
         run: |
           uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
@@ -28,3 +38,12 @@ jobs:
       - name: Type check with mypy
         run: |
           uv run mypy --install-types --non-interactive src/selectfilecli || true
+      - name: Check dependencies with deptry
+        run: |
+          uv run deptry src
+      - name: Lint YAML files
+        run: |
+          uv run yamllint .github/workflows/*.yml
+      - name: Lint GitHub Actions
+        run: |
+          actionlint
