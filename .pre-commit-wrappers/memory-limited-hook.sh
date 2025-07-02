@@ -21,7 +21,11 @@ fi
 
 # Cleanup on exit
 cleanup() {
-    pkill -P $$ 2>/dev/null || true
+    # Only kill direct children of this specific command, not all children of the shell
+    local cmd_pid=$!
+    if [ -n "${cmd_pid:-}" ] && kill -0 "$cmd_pid" 2>/dev/null; then
+        kill -TERM "$cmd_pid" 2>/dev/null || true
+    fi
     if [[ "$COMMAND" == *"python"* ]] || [[ "$COMMAND" == *"uv"* ]]; then
         python3 -c "import gc; gc.collect()" 2>/dev/null || true
     fi

@@ -14,10 +14,14 @@ fi
 
 # Create activation hooks directory for environment variables
 echo "Setting up project-local environment configuration..."
-mkdir -p .venv/bin/activate.d 2>/dev/null || mkdir -p .venv/Scripts/activate.d 2>/dev/null
+# Note: activate.d is not standard - we'll create our own activation script
+ACTIVATE_DIR=".venv/bin"
+if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]]; then
+    ACTIVATE_DIR=".venv/Scripts"
+fi
 
-# Create environment configuration that will be sourced on activation
-cat > .venv/bin/activate.d/sequential-precommit.sh << 'EOF'
+# Create our custom environment script
+cat > "${ACTIVATE_DIR}/sequential-precommit-env.sh" << 'EOF'
 #!/usr/bin/env bash
 # Project-local environment configuration
 export PRE_COMMIT_MAX_WORKERS=1
@@ -31,7 +35,7 @@ export TRUFFLEHOG_MEMORY_MB=1024
 export TRUFFLEHOG_CONCURRENCY=1
 EOF
 
-chmod +x .venv/bin/activate.d/sequential-precommit.sh 2>/dev/null || true
+chmod +x "${ACTIVATE_DIR}/sequential-precommit-env.sh" 2>/dev/null || true
 
 # Activate virtual environment
 source .venv/bin/activate
@@ -151,8 +155,10 @@ if [ -f ".venv/bin/activate" ]; then
 fi
 
 # Source sequential configuration
-if [ -f ".venv/bin/activate.d/sequential-precommit.sh" ]; then
-    source .venv/bin/activate.d/sequential-precommit.sh
+if [ -f ".venv/bin/sequential-precommit-env.sh" ]; then
+    source .venv/bin/sequential-precommit-env.sh
+elif [ -f ".venv/Scripts/sequential-precommit-env.sh" ]; then
+    source .venv/Scripts/sequential-precommit-env.sh
 fi
 
 # Configuration
@@ -293,7 +299,11 @@ monitor_resources() {
 
             # Get process tree before killing
             echo "[$timestamp] Process tree before termination:" >> "$LOG_FILE"
-            ps auxf | grep -E "(pre-commit|python|node|npm)" >> "$LOG_FILE" 2>/dev/null || true
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                ps aux | grep -E "(pre-commit|python|node|npm)" >> "$LOG_FILE" 2>/dev/null || true
+            else
+                ps auxf | grep -E "(pre-commit|python|node|npm)" >> "$LOG_FILE" 2>/dev/null || true
+            fi
 
             # Kill all child processes first
             for child_pid in $(pgrep -P "$parent_pid" 2>/dev/null); do
@@ -400,6 +410,7 @@ echo "✓ Sequential pre-commit with resource monitoring setup complete!"
 echo ""
 echo "To activate the environment:"
 echo "  source .venv/bin/activate"
+echo "  source ${ACTIVATE_DIR}/sequential-precommit-env.sh"
 echo ""
 echo "The following variables are now set (project-local):"
 echo "  PRE_COMMIT_MAX_WORKERS=1"

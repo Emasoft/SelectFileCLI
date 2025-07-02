@@ -26,11 +26,18 @@ else
     timeout_cmd=""
 fi
 
+# Check if exclude file exists
+EXCLUDE_ARGS=""
+if [ -f ".trufflehog-exclude" ]; then
+    EXCLUDE_ARGS="--exclude-paths=.trufflehog-exclude"
+fi
+
 $timeout_cmd trufflehog git file://. \
     --only-verified \
     --fail \
     --no-update \
-    --concurrency="$CONCURRENCY" || exit_code=$?
+    --concurrency="$CONCURRENCY" \
+    $EXCLUDE_ARGS || exit_code=$?
 
 if [ "${exit_code:-0}" -eq 124 ]; then
     echo "Warning: Trufflehog timed out after ${TIMEOUT}s"
