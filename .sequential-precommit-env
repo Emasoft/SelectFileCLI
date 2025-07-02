@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# Project-local environment configuration for sequential execution
+# Relocatable - uses relative paths from PROJECT_ROOT
+
+# Get the directory of this script
+if [ -n "${BASH_SOURCE[0]}" ]; then
+    _ENV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+else
+    _ENV_DIR="$(pwd)"
+fi
+
+# Export PROJECT_ROOT for all scripts
+export PROJECT_ROOT="${PROJECT_ROOT:-$_ENV_DIR}"
+
+# Core pre-commit settings - force sequential execution
+export PRE_COMMIT_MAX_WORKERS=1              # Limit pre-commit to single worker
+export PRE_COMMIT_NO_CONCURRENCY=1           # Additional safety flag
+export PRE_COMMIT_COLOR=always               # Keep color output
+
+# Python settings
+export PYTHONDONTWRITEBYTECODE=1             # Don't create .pyc files
+export PYTHONUNBUFFERED=1                    # Unbuffered output for real-time logs
+
+# UV package manager settings
+export UV_NO_CACHE=1                         # Disable cache to reduce memory usage
+export UV_SYSTEM_PYTHON=0                    # Use venv Python only
+
+# Resource limits for hooks
+export MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-2048}        # Max memory per hook (2GB)
+export TIMEOUT_SECONDS=${TIMEOUT_SECONDS:-600}         # Global timeout (10 minutes)
+
+# TruffleHog specific settings
+export TRUFFLEHOG_TIMEOUT=${TRUFFLEHOG_TIMEOUT:-300}   # 5 minute timeout
+export TRUFFLEHOG_MEMORY_MB=${TRUFFLEHOG_MEMORY_MB:-1024}  # 1GB memory limit
+export TRUFFLEHOG_CONCURRENCY=1                        # Single thread
+export TRUFFLEHOG_MAX_DEPTH=50                         # Limit git history depth
+
+# Monitoring settings
+export MONITOR_KILL_THRESHOLD_MB=${MONITOR_KILL_THRESHOLD_MB:-4096}  # Kill if exceeds 4GB
+export MONITOR_INTERVAL_SECONDS=1                      # Check resources every second
+export MAX_LOG_FILES=10                                # Rotate logs to prevent disk fill
+
+# Docker-specific settings
+export DOCKER_MEMORY_LIMIT="${DOCKER_MEMORY_LIMIT:-4g}"
+export DOCKER_CPU_LIMIT="${DOCKER_CPU_LIMIT:-2}"
+
+# CI/CD settings
+export CI_SEQUENTIAL_MODE=1                            # Force sequential in CI
+export CI_TIMEOUT_MINUTES=${CI_TIMEOUT_MINUTES:-45}    # CI job timeout
