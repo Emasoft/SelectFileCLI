@@ -1,0 +1,62 @@
+name: Sequential Pre-commit
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+# Force sequential workflow execution
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+env:
+  # Same environment as local development
+  PRE_COMMIT_MAX_WORKERS: 1
+  PYTHONDONTWRITEBYTECODE: 1
+  UV_NO_CACHE: 1
+  MEMORY_LIMIT_MB: 2048
+  TIMEOUT_SECONDS: 600
+  TRUFFLEHOG_TIMEOUT: 300
+  TRUFFLEHOG_CONCURRENCY: 1
+jobs:
+  sequential-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45 # Increased for sequential execution
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - name: Create virtual environment
+        run: uv venv
+      - name: Install dependencies
+        run: |
+          source .venv/bin/activate
+          uv sync --all-extras
+          uv pip install pre-commit
+      - name: Install local tools
+        run: |
+          # Install Trufflehog to project bin
+          mkdir -p .venv/bin
+          curl -sSfL https://raw.githubusercontent.com/trufflesecurity/trufflehog/main/scripts/install.sh | \
+            sh -s -- -b .venv/bin
+      - name: Run pre-commit hooks sequentially
+        run: |
+          source .venv/bin/activate
+          # Export same variables as local environment
+          export PRE_COMMIT_MAX_WORKERS=1
+          export MEMORY_LIMIT_MB=2048
+          export TIMEOUT_SECONDS=600
+
+          # Run all hooks
+          pre-commit run --all-files --show-diff-on-failure
+      - name: Memory usage report
+        if: always()
+        run: |
+          echo "Final memory usage:"
+          free -h || true

@@ -33,6 +33,7 @@
 import os
 import platform
 import stat
+import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Tuple
@@ -47,6 +48,13 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from rich.text import Text
+
+# Constants
+FILE_SIZE_UNIT = 1024.0
+FILE_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
+DEFAULT_DIR_SIZE = 0
+ASCENDING_ORDER_INDEX = 0
+WINDOWS_DRIVE_LETTERS = "CDEFGHIJKLMNOPQRSTUVWXYZAB"  # C first, then others
 
 
 class SortMode(Enum):
@@ -168,7 +176,7 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
         order_set = self.query_one("#sort-order", RadioSet)
         order_index = order_set.pressed_index
         if order_index is not None:
-            selected_order = SortOrder.ASCENDING if order_index == 0 else SortOrder.DESCENDING
+            selected_order = SortOrder.ASCENDING if order_index == ASCENDING_ORDER_INDEX else SortOrder.DESCENDING
         else:
             selected_order = self.current_order
 
@@ -195,13 +203,14 @@ class CustomDirectoryTree(DirectoryTree):
     def format_file_size(self, size: int) -> str:
         """Format file size in human-readable format."""
         size_float = float(size)
-        for unit in ["B", "KB", "MB", "GB", "TB"]:
-            if size_float < 1024.0:
+        for unit in FILE_SIZE_UNITS[:-1]:  # All units except PB
+            if size_float < FILE_SIZE_UNIT:
                 if unit == "B":
                     return f"{int(size_float)} {unit}"
                 return f"{size_float:.1f} {unit}"
-            size_float /= 1024.0
-        return f"{size_float:.1f} PB"
+            size_float /= FILE_SIZE_UNIT
+        # If we get here, it's in PB
+        return f"{size_float:.1f} {FILE_SIZE_UNITS[-1]}"
 
     def format_date(self, timestamp: float) -> str:
         """Format timestamp as readable date."""
@@ -297,7 +306,7 @@ class CustomDirectoryTree(DirectoryTree):
                 elif self.tree_sort_mode == SortMode.MODIFIED:
                     sort_key = stat.st_mtime
                 elif self.tree_sort_mode == SortMode.SIZE:
-                    sort_key = stat.st_size if path.is_file() else 0
+                    sort_key = stat.st_size if path.is_file() else DEFAULT_DIR_SIZE
                 elif self.tree_sort_mode == SortMode.EXTENSION:
                     sort_key = path.suffix.lower() if path.is_file() else ""
                 else:
@@ -415,7 +424,17 @@ class FileBrowserApp(App[Optional[str]]):
             start_path: The directory to start browsing from.
         """
         super().__init__()
-        self.start_path = Path(start_path).resolve()
+        # Validate start path
+        try:
+            path = Path(start_path).resolve()
+            if not path.exists():
+                path = Path.cwd()
+            elif not path.is_dir():
+                path = path.parent
+            self.start_path = path
+        except (OSError, ValueError):
+            self.start_path = Path.cwd()
+
         self.selected_file: Optional[str] = None
         self.current_sort_mode = SortMode.NAME
         self.current_sort_order = SortOrder.ASCENDING
@@ -511,7 +530,7 @@ class FileBrowserApp(App[Optional[str]]):
         # Get system root(s)
         if platform.system() == "Windows":
             # On Windows, try to find available drives
-            for drive_letter in "CDEFGHIJKLMNOPQRSTUVWXYZAB":
+            for drive_letter in WINDOWS_DRIVE_LETTERS:
                 drive_path = Path(f"{drive_letter}:\\")
                 if drive_path.exists():
                     await self._change_directory(drive_path)

@@ -1,0 +1,8 @@
+# TruffleHog v3 configuration
+# Exclude paths that contain test artifacts or generated reports
+
+exclude_paths:
+  - snapshot_report.html
+  - "**/snapshot_report.html"
+  - .pre-commit-logs/
+  - .pytest_cache/
