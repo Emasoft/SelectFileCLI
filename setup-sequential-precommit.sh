@@ -383,8 +383,11 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     FREE_MB=$(vm_stat | grep "Pages free" | awk '{print $3}' | sed 's/\.//')
     PAGE_SIZE=$(pagesize 2>/dev/null || echo 16384)
     FREE_MB=$((FREE_MB * PAGE_SIZE / 1024 / 1024))
-elif [[ "$OSTYPE" == "linux-gnu"* ]]; then
+elif [[ "$OSTYPE" == "linux"* ]] || command -v free &> /dev/null; then
     FREE_MB=$(free -m | awk 'NR==2{print $4}')
+else
+    # Default for other Unix-like systems
+    FREE_MB=1024
 fi
 
 if [ "${FREE_MB:-1024}" -lt 512 ]; then

@@ -19,12 +19,16 @@ if [[ "$OSTYPE" == "linux-gnu"* ]]; then
     ulimit -d $((MEMORY_LIMIT_MB * 1024)) 2>/dev/null || true
 fi
 
+# Global variable to store command PID
+CMD_PID=""
+
 # Cleanup on exit
 cleanup() {
-    # Only kill direct children of this specific command, not all children of the shell
-    local cmd_pid=$!
-    if [ -n "${cmd_pid:-}" ] && kill -0 "$cmd_pid" 2>/dev/null; then
-        kill -TERM "$cmd_pid" 2>/dev/null || true
+    # Kill the command process if it exists
+    if [ -n "${CMD_PID:-}" ] && kill -0 "$CMD_PID" 2>/dev/null; then
+        kill -TERM "$CMD_PID" 2>/dev/null || true
+        sleep 0.5
+        kill -KILL "$CMD_PID" 2>/dev/null || true
     fi
     if [[ "$COMMAND" == *"python"* ]] || [[ "$COMMAND" == *"uv"* ]]; then
         python3 -c "import gc; gc.collect()" 2>/dev/null || true
@@ -34,11 +38,22 @@ trap cleanup EXIT INT TERM
 
 echo "Running (memory limited to ${MEMORY_LIMIT_MB}MB): $COMMAND $*"
 
-# Execute with timeout
+# Execute with timeout - can't use exec because we need cleanup to run
 if command -v timeout &> /dev/null; then
-    exec timeout "$TIMEOUT_SECONDS" "$COMMAND" "$@"
+    timeout "$TIMEOUT_SECONDS" "$COMMAND" "$@" &
+    CMD_PID=$!
+    wait $CMD_PID
+    exit_code=$?
 elif command -v gtimeout &> /dev/null; then
-    exec gtimeout "$TIMEOUT_SECONDS" "$COMMAND" "$@"
+    gtimeout "$TIMEOUT_SECONDS" "$COMMAND" "$@" &
+    CMD_PID=$!
+    wait $CMD_PID
+    exit_code=$?
 else
-    "$COMMAND" "$@"
+    "$COMMAND" "$@" &
+    CMD_PID=$!
+    wait $CMD_PID
+    exit_code=$?
 fi
+
+exit $exit_code
