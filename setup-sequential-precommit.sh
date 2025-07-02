@@ -72,7 +72,11 @@ fi
 
 # Cleanup on exit
 cleanup() {
-    pkill -P $$ 2>/dev/null || true
+    # Only kill direct children of this specific command, not all children of the shell
+    local cmd_pid=$!
+    if [ -n "${cmd_pid:-}" ] && kill -0 "$cmd_pid" 2>/dev/null; then
+        kill -TERM "$cmd_pid" 2>/dev/null || true
+    fi
     if [[ "$COMMAND" == *"python"* ]] || [[ "$COMMAND" == *"uv"* ]]; then
         python3 -c "import gc; gc.collect()" 2>/dev/null || true
     fi
@@ -121,11 +125,18 @@ else
     timeout_cmd=""
 fi
 
+# Check if exclude file exists
+EXCLUDE_ARGS=""
+if [ -f ".trufflehog-exclude" ]; then
+    EXCLUDE_ARGS="--exclude-paths=.trufflehog-exclude"
+fi
+
 $timeout_cmd trufflehog git file://. \
     --only-verified \
     --fail \
     --no-update \
-    --concurrency="$CONCURRENCY" || exit_code=$?
+    --concurrency="$CONCURRENCY" \
+    $EXCLUDE_ARGS || exit_code=$?
 
 if [ "${exit_code:-0}" -eq 124 ]; then
     echo "Warning: Trufflehog timed out after ${TIMEOUT}s"
@@ -381,11 +392,26 @@ if [ "${FREE_MB:-1024}" -lt 512 ]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] WARNING: Starting with low system memory: ${FREE_MB}MB" >> "$LOG_FILE"
 fi
 
-# Run pre-commit
+# Run pre-commit using the pre-commit framework
 echo "Starting pre-commit with resource monitoring..."
 echo "Monitor log: $LOG_FILE"
-pre-commit run "$@"
-PRE_COMMIT_EXIT_CODE=$?
+
+# Call the pre-commit framework
+INSTALL_PYTHON="${PROJECT_ROOT}/.venv/bin/python3"
+ARGS=(hook-impl --config=.pre-commit-config.yaml --hook-type=pre-commit)
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ARGS+=(--hook-dir "$HERE" -- "$@")
+
+if [ -x "$INSTALL_PYTHON" ]; then
+    "$INSTALL_PYTHON" -mpre_commit "${ARGS[@]}"
+    PRE_COMMIT_EXIT_CODE=$?
+elif command -v pre-commit > /dev/null; then
+    pre-commit "${ARGS[@]}"
+    PRE_COMMIT_EXIT_CODE=$?
+else
+    echo '`pre-commit` not found.  Did you forget to activate your virtualenv?' 1>&2
+    PRE_COMMIT_EXIT_CODE=1
+fi
 
 # Give monitor time to write final metrics
 sleep 2
@@ -405,6 +431,32 @@ pre-commit install --hook-type commit-msg
 if ! grep -q ".pre-commit-logs" .gitignore 2>/dev/null; then
     echo ".pre-commit-logs/" >> .gitignore
 fi
+
+# Create TruffleHog exclude file with regex patterns
+cat > .trufflehog-exclude << 'EOF'
+^snapshot_report\.html$
+.*snapshot_report\.html$
+^\.pre-commit-logs/.*
+^\.pytest_cache/.*
+.*__pycache__/.*
+^\.git/.*
+.*\.pyc$
+.*\.pyo$
+.*\.log$
+.*\.tmp$
+^\.venv/.*
+^venv/.*
+^env/.*
+^\.env$
+^node_modules/.*
+^dist/.*
+^build/.*
+.*\.egg-info/.*
+^\.coverage$
+^htmlcov/.*
+^\.mypy_cache/.*
+^\.ruff_cache/.*
+EOF
 
 echo "✓ Sequential pre-commit with resource monitoring setup complete!"
 echo ""
