@@ -237,7 +237,7 @@ class CustomDirectoryTree(DirectoryTree):
         if size < 0:
             return "Invalid"
         if size == 0:
-            return "0B"
+            return "0 B"
 
         size_float = float(size)
         for unit in FILE_SIZE_UNITS[:-1]:  # All units except PB
@@ -245,21 +245,21 @@ class CustomDirectoryTree(DirectoryTree):
                 if unit == "B":
                     # For bytes, use integer with thousand separators
                     try:
-                        return f"{locale.format_string('%d', int(size_float), grouping=True)}B"
+                        return f"{locale.format_string('%d', int(size_float), grouping=True)} B"
                     except Exception:
-                        return f"{int(size_float):,}B"
+                        return f"{int(size_float):,} B"
                 else:
                     # For other units, use 2 decimal places
                     try:
-                        return f"{locale.format_string('%.2f', size_float, grouping=True)}{unit}"
+                        return f"{locale.format_string('%.2f', size_float, grouping=True)} {unit}"
                     except Exception:
-                        return f"{size_float:,.2f}{unit}"
+                        return f"{size_float:,.2f} {unit}"
             size_float /= FILE_SIZE_UNIT
         # If we get here, it's in PB
         try:
-            return f"{locale.format_string('%.2f', size_float, grouping=True)}{FILE_SIZE_UNITS[-1]}"
+            return f"{locale.format_string('%.2f', size_float, grouping=True)} {FILE_SIZE_UNITS[-1]}"
         except Exception:
-            return f"{size_float:,.2f}{FILE_SIZE_UNITS[-1]}"
+            return f"{size_float:,.2f} {FILE_SIZE_UNITS[-1]}"
 
     def format_date(self, timestamp: float) -> str:
         """Format timestamp as readable date with emoji in 24h format."""
@@ -320,11 +320,11 @@ class CustomDirectoryTree(DirectoryTree):
             Filename with quotes if needed
         """
         # Characters that require quoting
-        special_chars = " \t\n\r!$&'()*,:;<=>?@[\\]^`{|}~"
+        special_chars = " \t\n\r!$&'()*,:;<=>?@[\\]^`{|}~\""
 
         if any(char in filename for char in special_chars):
-            # Escape backslashes and quotes for shell safety
-            escaped = filename.replace("\\", "\\\\").replace('"', '\\"')
+            # Escape backslashes, quotes, and tabs for shell safety
+            escaped = filename.replace("\\", "\\\\").replace('"', '\\"').replace("\t", "\\t")
             return f'"{escaped}"'
         return filename
 
