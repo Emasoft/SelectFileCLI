@@ -63,7 +63,6 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from rich.text import Text
-import stat as stat_module  # Import the stat module to avoid name collision
 
 # Constants
 FILE_SIZE_UNIT = 1024.0
@@ -71,6 +70,12 @@ FILE_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 DEFAULT_DIR_SIZE = 0
 ASCENDING_ORDER_INDEX = 0
 WINDOWS_DRIVE_LETTERS = "CDEFGHIJKLMNOPQRSTUVWXYZAB"  # C first, then others
+MAX_VENV_CACHE_SIZE = 1000  # Maximum entries in venv cache
+MAX_DIR_CACHE_SIZE = 500  # Maximum entries in directory size cache
+MAX_DIRECTORY_DEPTH = 100  # Maximum recursion depth for directory traversal
+# UI Element Heights
+NAVIGATION_BAR_HEIGHT = 3
+PATH_DISPLAY_HEIGHT = 1
 
 # Set up locale for number formatting
 try:
@@ -269,7 +274,7 @@ class CustomDirectoryTree(DirectoryTree):
             Tuple of (color_style, suffix)
         """
         # Check symlink first
-        if stat_module.S_ISLNK(file_stat.st_mode):
+        if stat.S_ISLNK(file_stat.st_mode):
             try:
                 # Check if symlink is broken by trying to stat the target
                 path.stat()
@@ -282,15 +287,15 @@ class CustomDirectoryTree(DirectoryTree):
             return "bright_blue", "/"
 
         # Check if executable
-        if file_stat.st_mode & (stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH):
+        if file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
             return "bright_green", "*"
 
         # Socket
-        if stat_module.S_ISSOCK(file_stat.st_mode):
+        if stat.S_ISSOCK(file_stat.st_mode):
             return "yellow", "="
 
         # Named pipe (FIFO)
-        if stat_module.S_ISFIFO(file_stat.st_mode):
+        if stat.S_ISFIFO(file_stat.st_mode):
             return "cyan", "|"
 
         # Check extensions for special coloring
@@ -306,15 +311,35 @@ class CustomDirectoryTree(DirectoryTree):
         return "white", ""
 
     def format_filename_with_quotes(self, filename: str) -> str:
-        """Add quotes around filenames with spaces or special characters."""
+        """Add quotes around filenames with spaces or special characters.
+
+        Args:
+            filename: The filename to format
+
+        Returns:
+            Filename with quotes if needed
+        """
         # Characters that require quoting
         special_chars = " \t\n\r!$&'()*,:;<=>?@[\\]^`{|}~"
 
         if any(char in filename for char in special_chars):
-            # More robust escaping that avoids double-escaping
+            # Escape backslashes and quotes for shell safety
             escaped = filename.replace("\\", "\\\\").replace('"', '\\"')
             return f'"{escaped}"'
         return filename
+
+    def _manage_cache(self, cache: Dict[str, Any], key: str, max_size: int) -> None:
+        """Manage LRU cache eviction.
+
+        Args:
+            cache: The cache dictionary to manage
+            key: The key being accessed/added
+            max_size: Maximum cache size
+        """
+        if len(cache) >= max_size and key not in cache:
+            # Evict oldest entry (first key)
+            oldest_key = next(iter(cache))
+            del cache[oldest_key]
 
     def has_venv(self, dir_path: Path) -> bool:
         """Check if directory contains a Python virtual environment."""
@@ -333,6 +358,9 @@ class CustomDirectoryTree(DirectoryTree):
                     result = True
                     break
 
+        # Manage cache size before adding
+        self._manage_cache(self._venv_cache, path_str, MAX_VENV_CACHE_SIZE)
+
         # Cache the result
         self._venv_cache[path_str] = result
         return result
@@ -347,8 +375,21 @@ class CustomDirectoryTree(DirectoryTree):
         except Exception:
             return None
 
-    def calculate_directory_size(self, dir_path: Path) -> int:
-        """Calculate total size of directory recursively with caching."""
+    def calculate_directory_size(self, dir_path: Path, depth: int = 0, max_items: int = 1000) -> int:
+        """Calculate total size of directory recursively with caching and depth protection.
+
+        Args:
+            dir_path: Directory to calculate size for
+            depth: Current recursion depth (internal parameter)
+            max_items: Maximum number of items to process (to prevent hanging)
+
+        Returns:
+            Total size in bytes, or 0 if cannot be calculated
+        """
+        # Protect against infinite recursion
+        if depth > MAX_DIRECTORY_DEPTH:
+            return 0
+
         path_str = str(dir_path)
 
         # Check cache first
@@ -356,17 +397,24 @@ class CustomDirectoryTree(DirectoryTree):
             return self._dir_size_cache[path_str]
 
         total_size = 0
+        items_processed = 0
         try:
             for entry in dir_path.iterdir():
+                # Limit the number of items to prevent hanging
+                if items_processed >= max_items:
+                    # Stop processing if we've hit the limit
+                    break
+                items_processed += 1
+
                 try:
                     # Use lstat to avoid following symlinks
                     stat_info = entry.lstat()
-                    if stat_module.S_ISREG(stat_info.st_mode):
+                    if stat.S_ISREG(stat_info.st_mode):
                         # Regular file - add its size
                         total_size += stat_info.st_size
-                    elif stat_module.S_ISDIR(stat_info.st_mode):
-                        # Directory - recursively calculate its size
-                        total_size += self.calculate_directory_size(entry)
+                    elif stat.S_ISDIR(stat_info.st_mode):
+                        # Directory - recursively calculate its size with incremented depth
+                        total_size += self.calculate_directory_size(entry, depth + 1, max_items)
                     # Skip symlinks, special files, etc.
                 except (PermissionError, OSError):
                     # Skip files/dirs we can't access
@@ -375,9 +423,28 @@ class CustomDirectoryTree(DirectoryTree):
             # Can't read directory
             pass
 
+        # Manage cache size before adding
+        self._manage_cache(self._dir_size_cache, path_str, MAX_DIR_CACHE_SIZE)
+
         # Cache the result
         self._dir_size_cache[path_str] = total_size
         return total_size
+
+    def _get_file_stat_info(self, file_path: Path) -> tuple[Any, bool, bool]:
+        """Get file stat information.
+
+        Args:
+            file_path: Path to get stats for
+
+        Returns:
+            Tuple of (stat_result, is_dir, is_accessible)
+        """
+        try:
+            file_stat = file_path.lstat()
+            is_dir = file_path.is_dir()
+            return file_stat, is_dir, True
+        except (OSError, PermissionError):
+            return None, False, False
 
     def _render_root_label(self) -> Text:
         """Render the root node label with directory information."""
@@ -438,7 +505,7 @@ class CustomDirectoryTree(DirectoryTree):
                 is_dir = file_path.is_dir()
             except (OSError, PermissionError):
                 # Return simple label if we can't access
-                return Text(file_path.name, style="dim red")
+                return Text(file_path.name if file_path else "Unknown", style="dim red")
 
             # Get color and suffix based on file type
             color_style, suffix = self.get_file_color_and_suffix(file_path, file_stat)
@@ -494,22 +561,18 @@ class CustomDirectoryTree(DirectoryTree):
                     continue
                 stat = path.lstat()  # Use lstat for consistency
 
-                # Extract sort key based on mode
-                sort_key: str | float | int
-                if self.tree_sort_mode == SortMode.NAME:
-                    sort_key = path.name.lower()
-                elif self.tree_sort_mode == SortMode.CREATED:
-                    sort_key = stat.st_ctime
-                elif self.tree_sort_mode == SortMode.ACCESSED:
-                    sort_key = stat.st_atime
-                elif self.tree_sort_mode == SortMode.MODIFIED:
-                    sort_key = stat.st_mtime
-                elif self.tree_sort_mode == SortMode.SIZE:
-                    sort_key = stat.st_size if path.is_file() else DEFAULT_DIR_SIZE
-                elif self.tree_sort_mode == SortMode.EXTENSION:
-                    sort_key = path.suffix.lower() if path.is_file() else ""
-                else:
-                    sort_key = path.name.lower()
+                # Extract sort key based on mode using strategy pattern
+                sort_key_extractors = {
+                    SortMode.NAME: lambda p, s: p.name.lower(),
+                    SortMode.CREATED: lambda p, s: s.st_ctime,
+                    SortMode.ACCESSED: lambda p, s: s.st_atime,
+                    SortMode.MODIFIED: lambda p, s: s.st_mtime,
+                    SortMode.SIZE: lambda p, s: s.st_size if p.is_file() else DEFAULT_DIR_SIZE,
+                    SortMode.EXTENSION: lambda p, s: p.suffix.lower() if p.is_file() else "",
+                }
+
+                extractor = sort_key_extractors.get(self.tree_sort_mode, lambda p, s: p.name.lower())
+                sort_key = extractor(path, stat)  # type: ignore[no-untyped-call]
 
                 children_info.append((child, sort_key, path.is_dir()))
             except (OSError, AttributeError):
@@ -571,11 +634,27 @@ class FileBrowserApp(App[Optional[FileInfo]]):
     """
 
     CSS = """
+    FileBrowserApp {
+        layers: base;
+    }
+
+    #main-container {
+        width: 100%;
+        height: 100%;
+        layer: base;
+    }
+
+    #tree-container {
+        width: 100%;
+        height: 1fr;
+    }
+
     CustomDirectoryTree {
         background: $surface;
         color: $text;
         padding: 1;
         border: solid $primary;
+        width: 100%;
         height: 100%;
     }
 
@@ -584,18 +663,20 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         color: $text-muted;
         padding: 0 1;
         height: 1;
-        dock: top;
+        width: 100%;
     }
 
     #navigation-bar {
-        dock: top;
         height: 3;
         background: $boost;
         padding: 0 1;
+        width: 100%;
+        layout: horizontal;
     }
 
     #navigation-bar Button {
         margin: 0 1;
+        min-width: 16;
     }
     """
 
@@ -627,7 +708,8 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             elif not path.is_dir():
                 path = path.parent
             self.start_path = path
-        except (OSError, ValueError):
+        except (OSError, ValueError, RuntimeError):
+            # RuntimeError can occur with circular symlinks
             self.start_path = Path.cwd()
 
         self.selected_item: Optional[FileInfo] = None
@@ -640,13 +722,14 @@ class FileBrowserApp(App[Optional[FileInfo]]):
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
-        with Horizontal(id="navigation-bar"):
-            yield Button("🔼 [u]P[/u]arent", id="parent-button", variant="primary")
-            yield Button("🏠 [u]H[/u]ome", id="home-button", variant="default")
-            yield Button("⏫ [u]R[/u]oot", id="root-button", variant="default")
-        yield Label("", id="path-display")
-        with Vertical(id="tree-container"):
-            yield CustomDirectoryTree(str(self.start_path), id="directory-tree")
+        with Vertical(id="main-container"):
+            with Horizontal(id="navigation-bar"):
+                yield Button("🔼 [u]P[/u]arent", id="parent-button", variant="primary")
+                yield Button("🏠 [u]H[/u]ome", id="home-button", variant="default")
+                yield Button("⏫ [u]R[/u]oot", id="root-button", variant="default")
+            yield Label("", id="path-display")
+            with Vertical(id="tree-container"):
+                yield CustomDirectoryTree(str(self.start_path), id="directory-tree")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -681,7 +764,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             event: The file selection event containing the selected path.
         """
         if self.select_files:
-            self._create_file_info(event.path, is_file=True)
+            self._create_file_info(Path(event.path), is_file=True)
 
     @on(DirectoryTree.DirectorySelected)
     def on_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
@@ -705,7 +788,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         try:
             # Get file stats
             stat_result = path.lstat()
-            is_symlink = stat_module.S_ISLNK(stat_result.st_mode)
+            is_symlink = stat.S_ISLNK(stat_result.st_mode)
             symlink_broken = False
 
             if is_symlink:
@@ -729,8 +812,9 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
             self.selected_item = info
             self.exit(self.selected_item)
-        except Exception:
+        except (OSError, IOError, PermissionError, ValueError) as e:
             # If we can't get file info, exit without selection
+            # Log the error for debugging if needed
             self.exit(None)
 
     def _check_venv(self, path: Path) -> bool:
@@ -814,23 +898,26 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         """Handle root button click."""
         # Get system root(s)
         if platform.system() == "Windows":
-            # On Windows, try to find available drives
-            found_drive = False
-            for drive_letter in WINDOWS_DRIVE_LETTERS:
-                drive_path = Path(f"{drive_letter}:\\")
-                if drive_path.exists():
-                    await self._change_directory(drive_path)
-                    found_drive = True
-                    break
-
-            if not found_drive:
-                # Fallback to current drive root
-                try:
-                    current_drive = Path.cwd().drive
-                    if current_drive:
-                        await self._change_directory(Path(current_drive + "\\"))
-                except Exception:
-                    pass
+            # On Windows, use current drive root for better performance
+            try:
+                current_drive = Path.cwd().drive
+                if current_drive:
+                    await self._change_directory(Path(current_drive + "\\"))
+                else:
+                    # Fallback to C: drive
+                    c_drive = Path("C:\\")
+                    if c_drive.exists():
+                        await self._change_directory(c_drive)
+            except Exception:
+                # Last resort: try common drives
+                for drive_letter in ["C", "D", "E"]:
+                    drive_path = Path(f"{drive_letter}:\\")
+                    try:
+                        if drive_path.exists():
+                            await self._change_directory(drive_path)
+                            break
+                    except (OSError, PermissionError):
+                        continue
         else:  # Unix-like
             await self._change_directory(Path("/"))
 

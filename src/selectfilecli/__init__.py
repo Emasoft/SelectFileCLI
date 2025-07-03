@@ -22,8 +22,10 @@ selectfilecli - A handy file selection browser for CLI applications.
 This module provides a simple API to display a file browser TUI and get the selected file path.
 """
 
-from typing import Optional, Union, overload
+from typing import Any, Optional, Union, overload
 import os
+import signal
+import sys
 import warnings
 from .file_info import FileInfo
 
@@ -73,6 +75,8 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
         start_path = os.getcwd()
     elif not os.path.isdir(start_path):
         raise ValueError(f"Start path must be a valid directory: {start_path}")
+    elif not os.access(start_path, os.R_OK):
+        raise ValueError(f"Start path must be readable: {start_path}")
 
     # Validate selection options
     if not select_files and not select_dirs:
@@ -83,9 +87,20 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
         # Auto-detect: use FileInfo if dirs are selectable or explicitly requested
         return_info = select_dirs
 
-    # Create and run the Textual app
-    app = FileBrowserApp(start_path=start_path, select_files=select_files, select_dirs=select_dirs)
-    result = app.run()
+    # Setup signal handlers for clean exit
+    def signal_handler(signum: int, frame: Any) -> None:
+        """Handle interrupt signals gracefully."""
+        sys.exit(0)
+
+    # Register signal handlers
+    original_sigint = signal.signal(signal.SIGINT, signal_handler)
+    try:
+        # Create and run the Textual app
+        app = FileBrowserApp(start_path=start_path, select_files=select_files, select_dirs=select_dirs)
+        result = app.run()
+    finally:
+        # Restore original signal handler
+        signal.signal(signal.SIGINT, original_sigint)
 
     if result is None:
         return None
@@ -102,4 +117,4 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
 
 
 __all__ = ["select_file", "FileInfo"]
-__version__ = "0.4.0-alpha"
+__version__ = "0.4.1"  # Follow semantic versioning

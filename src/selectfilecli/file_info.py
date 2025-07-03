@@ -41,7 +41,7 @@ class FileInfo:
     """Creation timestamp of the file/folder (may not be available on all systems)."""
 
     size_in_bytes: Optional[int] = None
-    """Size in bytes (files only, None for directories)."""
+    """Size in bytes (for files: actual size; for directories: calculated total size)."""
 
     readonly: Optional[bool] = None
     """True if the file/folder is read-only, False if writable."""
