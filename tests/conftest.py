@@ -11,6 +11,7 @@
 # - Added environment detection for Docker/CI
 # - Configured retry counts based on environment
 # - Added fixtures for common test operations
+# - Added type annotations to all functions and fixtures
 #
 
 """Pytest configuration for selectfilecli tests."""
@@ -18,6 +19,7 @@
 import os
 import sys
 from pathlib import Path
+from typing import Dict, Any
 
 import pytest
 
@@ -53,7 +55,7 @@ def get_timeout() -> int:
 
 
 @pytest.fixture
-def test_env():
+def test_env() -> Dict[str, Any]:
     """Provide test environment information."""
     return {
         "is_docker": is_running_in_docker(),
@@ -64,7 +66,7 @@ def test_env():
 
 
 @pytest.fixture
-def temp_dir(tmp_path):
+def temp_dir(tmp_path: Path) -> Path:
     """Create a temporary directory with test files."""
     # Create test structure
     (tmp_path / "file1.txt").write_text("Test file 1")

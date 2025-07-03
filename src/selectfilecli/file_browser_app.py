@@ -33,6 +33,12 @@
 # - Implemented ls-style visual cues: colors, suffixes (/, *, @, |, =), quoted filenames
 # - Added root node label with directory information
 # - Added ✨ emoji for directories containing Python virtual environments
+# - Added support for folder selection with select_files and select_dirs parameters
+# - Fixed symlink detection to use lstat consistently
+# - Added FileInfo return type with comprehensive file/folder information
+# - Fixed edge cases: negative file sizes, Windows drive detection, filename escaping
+# - Added venv detection caching for performance
+# - Fixed sort dialog button handling
 #
 
 """Textual-based file browser application."""
@@ -44,8 +50,9 @@ import sys
 import locale
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any, Tuple
+from typing import Optional, Any, Tuple, Dict
 from enum import Enum
+from .file_info import FileInfo
 
 from textual import on
 from textual.app import App, ComposeResult
@@ -56,6 +63,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from rich.text import Text
+import stat as stat_module  # Import the stat module to avoid name collision
 
 # Constants
 FILE_SIZE_UNIT = 1024.0
@@ -210,13 +218,18 @@ class CustomDirectoryTree(DirectoryTree):
 
     tree_sort_mode = reactive(SortMode.NAME)
     tree_sort_order = reactive(SortOrder.ASCENDING)
+    allow_file_select = reactive(True)
+    allow_dir_select = reactive(False)
 
     def __init__(self, path: str, **kwargs: Any) -> None:
         super().__init__(path, **kwargs)
         self._original_path = path
+        self._venv_cache: Dict[str, bool] = {}  # Cache for venv detection
 
     def format_file_size(self, size: int) -> str:
         """Format file size in human-readable format with locale support."""
+        if size < 0:
+            return "Invalid"
         if size == 0:
             return "0B"
 
@@ -255,9 +268,9 @@ class CustomDirectoryTree(DirectoryTree):
             Tuple of (color_style, suffix)
         """
         # Check symlink first
-        if path.is_symlink():
+        if stat_module.S_ISLNK(file_stat.st_mode):
             try:
-                # Check if symlink is broken
+                # Check if symlink is broken by trying to stat the target
                 path.stat()
                 return "bright_cyan", "@"
             except (OSError, IOError):
@@ -268,15 +281,15 @@ class CustomDirectoryTree(DirectoryTree):
             return "bright_blue", "/"
 
         # Check if executable
-        if file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+        if file_stat.st_mode & (stat_module.S_IXUSR | stat_module.S_IXGRP | stat_module.S_IXOTH):
             return "bright_green", "*"
 
         # Socket
-        if stat.S_ISSOCK(file_stat.st_mode):
+        if stat_module.S_ISSOCK(file_stat.st_mode):
             return "yellow", "="
 
         # Named pipe (FIFO)
-        if stat.S_ISFIFO(file_stat.st_mode):
+        if stat_module.S_ISFIFO(file_stat.st_mode):
             return "cyan", "|"
 
         # Check extensions for special coloring
@@ -297,23 +310,31 @@ class CustomDirectoryTree(DirectoryTree):
         special_chars = " \t\n\r!$&'()*,:;<=>?@[\\]^`{|}~"
 
         if any(char in filename for char in special_chars):
-            # Escape existing quotes and backslashes
+            # More robust escaping that avoids double-escaping
             escaped = filename.replace("\\", "\\\\").replace('"', '\\"')
             return f'"{escaped}"'
         return filename
 
     def has_venv(self, dir_path: Path) -> bool:
         """Check if directory contains a Python virtual environment."""
-        if not dir_path.is_dir():
-            return False
+        # Check cache first
+        path_str = str(dir_path)
+        if path_str in self._venv_cache:
+            return self._venv_cache[path_str]
 
-        # Common venv indicators
-        venv_indicators = ["pyvenv.cfg", "bin/activate", "Scripts/activate.bat", "bin/python", "Scripts/python.exe"]
+        result = False
+        if dir_path.is_dir():
+            # Common venv indicators
+            venv_indicators = ["pyvenv.cfg", "bin/activate", "Scripts/activate.bat", "bin/python", "Scripts/python.exe"]
 
-        for indicator in venv_indicators:
-            if (dir_path / indicator).exists():
-                return True
-        return False
+            for indicator in venv_indicators:
+                if (dir_path / indicator).exists():
+                    result = True
+                    break
+
+        # Cache the result
+        self._venv_cache[path_str] = result
+        return result
 
     def _render_root_label(self) -> Text:
         """Render the root node label with directory information."""
@@ -428,7 +449,7 @@ class CustomDirectoryTree(DirectoryTree):
                     path = Path(child.data.path)
                 else:
                     path = Path(str(child.data))
-                stat = path.stat()
+                stat = path.lstat()  # Use lstat for consistency
 
                 # Extract sort key based on mode
                 sort_key: str | float | int
@@ -495,23 +516,15 @@ class CustomDirectoryTree(DirectoryTree):
         self.refresh()
 
     def on_directory_tree_directory_selected(self, event: Any) -> None:
-        """Apply sorting when directory is expanded."""
-        # Find the node that was selected
-        node = event.node
-        # Toggle the expansion state
-        if node.is_expanded:
-            node.collapse()
-        else:
-            node.expand()
-            # Sort the newly loaded children
-            self.sort_children_by_mode(node)
-        self.refresh()
+        """Handle directory selection - either select it or expand/collapse."""
+        # This is handled by the app's on_directory_selected method now
+        pass
 
 
-class FileBrowserApp(App[Optional[str]]):
+class FileBrowserApp(App[Optional[FileInfo]]):
     """A Textual app for browsing and selecting files with sorting options.
 
-    The app returns the selected file path via app.return_value.
+    The app returns FileInfo object with comprehensive file/folder information.
     """
 
     CSS = """
@@ -551,13 +564,16 @@ class FileBrowserApp(App[Optional[str]]):
         Binding("backspace", "go_parent", "Parent"),
         Binding("h", "go_home", "Home", show=True),
         Binding("r", "go_root", "Root", show=True),
+        Binding("d", "select_current_directory", "Select Dir", show=False),
     ]
 
-    def __init__(self, start_path: str = "."):
+    def __init__(self, start_path: str = ".", select_files: bool = True, select_dirs: bool = False):
         """Initialize the file browser.
 
         Args:
             start_path: The directory to start browsing from.
+            select_files: Whether to allow file selection.
+            select_dirs: Whether to allow directory selection.
         """
         super().__init__()
         # Validate start path
@@ -571,7 +587,9 @@ class FileBrowserApp(App[Optional[str]]):
         except (OSError, ValueError):
             self.start_path = Path.cwd()
 
-        self.selected_file: Optional[str] = None
+        self.selected_item: Optional[FileInfo] = None
+        self.select_files = select_files
+        self.select_dirs = select_dirs
         self.current_sort_mode = SortMode.NAME
         self.current_sort_order = SortOrder.ASCENDING
         self.current_path = self.start_path
@@ -591,10 +609,22 @@ class FileBrowserApp(App[Optional[str]]):
     def on_mount(self) -> None:
         """Called when the app is mounted."""
         self.title = "Select File Browser"
-        self.sub_title = "Navigate with arrows, Enter to select, Q to quit"
+        # Update subtitle based on what can be selected
+        select_types = []
+        if self.select_files:
+            select_types.append("files")
+        if self.select_dirs:
+            select_types.append("folders")
+        select_text = " or ".join(select_types)
+        if self.select_dirs:
+            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, D to select dir, Q to quit"
+        else:
+            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, Q to quit"
 
         # Set initial focus to directory tree
         tree = self.query_one("#directory-tree", CustomDirectoryTree)
+        tree.allow_file_select = self.select_files
+        tree.allow_dir_select = self.select_dirs
         tree.focus()
 
         # Update path display for root
@@ -607,8 +637,63 @@ class FileBrowserApp(App[Optional[str]]):
         Args:
             event: The file selection event containing the selected path.
         """
-        self.selected_file = str(event.path)
-        self.exit(self.selected_file)
+        if self.select_files:
+            self._create_file_info(event.path, is_file=True)
+
+    @on(DirectoryTree.DirectorySelected)
+    def on_directory_selected(self, event: DirectoryTree.DirectorySelected) -> None:
+        """Handle directory selection.
+
+        Args:
+            event: The directory selection event containing the selected path.
+        """
+        # Default behavior - toggle expand/collapse
+        tree = self.query_one("#directory-tree", CustomDirectoryTree)
+        node = event.node
+        if node.is_expanded:
+            node.collapse()
+        else:
+            node.expand()
+            tree.sort_children_by_mode(node)
+        tree.refresh()
+
+    def _create_file_info(self, path: Path, is_file: bool) -> None:
+        """Create FileInfo object and exit the app."""
+        try:
+            # Get file stats
+            stat_result = path.lstat()
+            is_symlink = stat_module.S_ISLNK(stat_result.st_mode)
+            symlink_broken = False
+
+            if is_symlink:
+                try:
+                    path.stat()  # Check if target exists
+                except (OSError, IOError):
+                    symlink_broken = True
+
+            # Create FileInfo object
+            info = FileInfo(
+                file_path=path if is_file else None,
+                folder_path=path if not is_file else None,
+                last_modified_datetime=datetime.fromtimestamp(stat_result.st_mtime),
+                creation_datetime=datetime.fromtimestamp(stat_result.st_ctime),
+                size_in_bytes=stat_result.st_size if is_file else None,
+                readonly=not os.access(path, os.W_OK),
+                folder_has_venv=self._check_venv(path) if not is_file else None,
+                is_symlink=is_symlink,
+                symlink_broken=symlink_broken,
+            )
+
+            self.selected_item = info
+            self.exit(self.selected_item)
+        except Exception:
+            # If we can't get file info, exit without selection
+            self.exit(None)
+
+    def _check_venv(self, path: Path) -> bool:
+        """Check if directory contains a virtual environment."""
+        tree = self.query_one("#directory-tree", CustomDirectoryTree)
+        return tree.has_venv(path)
 
     @on(DirectoryTree.NodeHighlighted)
     def on_node_highlighted(self, event: DirectoryTree.NodeHighlighted[Any]) -> None:
@@ -654,6 +739,18 @@ class FileBrowserApp(App[Optional[str]]):
         """Navigate to root directory."""
         await self.on_root_button()
 
+    async def action_select_current_directory(self) -> None:
+        """Select the current highlighted directory."""
+        if not self.select_dirs:
+            return
+
+        # Get the currently highlighted node
+        tree = self.query_one("#directory-tree", CustomDirectoryTree)
+        if tree.cursor_node and tree.cursor_node.data:
+            path = Path(tree.cursor_node.data.path) if hasattr(tree.cursor_node.data, "path") else Path(str(tree.cursor_node.data))
+            if path.is_dir():
+                self._create_file_info(path, is_file=False)
+
     @on(Button.Pressed, "#parent-button")
     async def on_parent_button(self) -> None:
         """Handle parent button click."""
@@ -670,11 +767,22 @@ class FileBrowserApp(App[Optional[str]]):
         # Get system root(s)
         if platform.system() == "Windows":
             # On Windows, try to find available drives
+            found_drive = False
             for drive_letter in WINDOWS_DRIVE_LETTERS:
                 drive_path = Path(f"{drive_letter}:\\")
                 if drive_path.exists():
                     await self._change_directory(drive_path)
+                    found_drive = True
                     break
+
+            if not found_drive:
+                # Fallback to current drive root
+                try:
+                    current_drive = Path.cwd().drive
+                    if current_drive:
+                        await self._change_directory(Path(current_drive + "\\"))
+                except Exception:
+                    pass
         else:  # Unix-like
             await self._change_directory(Path("/"))
 
@@ -693,6 +801,8 @@ class FileBrowserApp(App[Optional[str]]):
         new_tree = CustomDirectoryTree(str(self.current_path), id="directory-tree")
         new_tree.tree_sort_mode = self.current_sort_mode
         new_tree.tree_sort_order = self.current_sort_order
+        new_tree.allow_file_select = self.select_files
+        new_tree.allow_dir_select = self.select_dirs
         await container.mount(new_tree)
 
         # Focus the new tree
