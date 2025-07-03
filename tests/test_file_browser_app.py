@@ -126,7 +126,16 @@ class TestFileBrowserApp:
         app = FileBrowserApp(start_path=str(temp_directory))
         async with app.run_test() as pilot:
             assert pilot.app.title == "Select File Browser"
-            assert pilot.app.sub_title == "Navigate with arrows, Enter to select, Q to quit"
+            # Default is select_files=True, select_dirs=False
+            assert pilot.app.sub_title == "Navigate with arrows, Enter to select files, Q to quit"
+
+    @pytest.mark.asyncio
+    async def test_app_title_with_folder_selection(self, temp_directory):
+        """Test that the app sets the correct subtitle when folder selection is enabled."""
+        app = FileBrowserApp(start_path=str(temp_directory), select_files=True, select_dirs=True)
+        async with app.run_test() as pilot:
+            assert pilot.app.title == "Select File Browser"
+            assert pilot.app.sub_title == "Navigate with arrows, Enter to select files or folders, D to select dir, Q to quit"
 
     @pytest.mark.asyncio
     async def test_quit_action(self, temp_directory):
@@ -378,15 +387,18 @@ class TestSelectFileFunction:
 
         # Mock the FileBrowserApp to return a specific path
         class MockApp:
-            def __init__(self, start_path: str) -> None:
+            def __init__(self, start_path: str, select_files: bool = True, select_dirs: bool = False) -> None:
                 self.start_path = start_path
+                self.select_files = select_files
+                self.select_dirs = select_dirs
 
-            def run(self) -> str:
-                return selected_path
+            def run(self) -> FileInfo:
+                return FileInfo(file_path=Path(selected_path))
 
         monkeypatch.setattr("selectfilecli.file_browser_app.FileBrowserApp", MockApp)
 
         result = select_file(str(temp_directory))
+        # Default behavior should return string for backward compatibility
         assert result == selected_path
 
     def test_select_file_default_path(self, monkeypatch):
@@ -395,8 +407,10 @@ class TestSelectFileFunction:
 
         # Mock the app
         class MockApp:
-            def __init__(self, start_path: str) -> None:
+            def __init__(self, start_path: str, select_files: bool = True, select_dirs: bool = False) -> None:
                 self.start_path = start_path
+                self.select_files = select_files
+                self.select_dirs = select_dirs
                 assert start_path == os.getcwd()
 
             def run(self) -> None:
@@ -1606,7 +1620,7 @@ class TestNewFeatures:
         # Test unpacking
         (file_path, folder_path, last_mod, creation, size, readonly, has_venv, is_link, link_broken) = info
 
-        assert file_path == "/test/file.txt"
+        assert file_path == Path("/test/file.txt")
         assert folder_path is None
         assert isinstance(last_mod, datetime)
         assert isinstance(creation, datetime)
@@ -1620,4 +1634,84 @@ class TestNewFeatures:
         t = info.as_tuple()
         assert isinstance(t, tuple)
         assert len(t) == 9
-        assert t[0] == "/test/file.txt"
+        assert t[0] == Path("/test/file.txt")
+
+    @pytest.mark.asyncio
+    async def test_recursive_directory_size(self) -> None:
+        """Test recursive directory size calculation."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create nested directory structure with files
+            subdir1 = test_dir / "subdir1"
+            subdir1.mkdir()
+            (subdir1 / "file1.txt").write_text("x" * 100)  # 100 bytes
+
+            subdir2 = subdir1 / "subdir2"
+            subdir2.mkdir()
+            (subdir2 / "file2.txt").write_text("y" * 200)  # 200 bytes
+            (subdir2 / "file3.txt").write_text("z" * 300)  # 300 bytes
+
+            # Root level file
+            (test_dir / "root.txt").write_text("a" * 50)  # 50 bytes
+
+            app = FileBrowserApp(str(test_dir))
+            async with app.run_test() as pilot:
+                tree = pilot.app.query_one(CustomDirectoryTree)
+
+                # Test recursive size calculation
+                total_size = tree.calculate_directory_size(test_dir)
+                assert total_size == 650  # 100 + 200 + 300 + 50
+
+                # Test caching
+                assert str(test_dir) in tree._dir_size_cache
+                assert tree._dir_size_cache[str(test_dir)] == 650
+
+                # Test subdirectory size
+                subdir1_size = tree.calculate_directory_size(subdir1)
+                assert subdir1_size == 600  # 100 + 200 + 300
+
+                # Test root node display shows size
+                root_label = tree._render_root_label()
+                label_text = root_label.plain
+
+                # Should contain size (650B)
+                assert "650B" in label_text or "650 B" in label_text
+
+    @pytest.mark.asyncio
+    async def test_directory_size_with_permissions(self) -> None:
+        """Test directory size calculation handles permission errors."""
+        if os.name == "nt":
+            pytest.skip("Unix-specific permission test")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create accessible directory
+            accessible = test_dir / "accessible"
+            accessible.mkdir()
+            (accessible / "file.txt").write_text("test" * 25)  # 100 bytes
+
+            # Create inaccessible directory
+            restricted = test_dir / "restricted"
+            restricted.mkdir()
+            (restricted / "secret.txt").write_text("secret" * 10)  # 60 bytes
+
+            # Remove read permission
+            restricted.chmod(0o000)
+
+            try:
+                app = FileBrowserApp(str(test_dir))
+                async with app.run_test() as pilot:
+                    tree = pilot.app.query_one(CustomDirectoryTree)
+
+                    # Should calculate size of accessible files only
+                    total_size = tree.calculate_directory_size(test_dir)
+                    assert total_size == 100  # Only accessible/file.txt
+
+                    # Restricted directory should return 0
+                    restricted_size = tree.calculate_directory_size(restricted)
+                    assert restricted_size == 0
+            finally:
+                # Restore permissions for cleanup
+                restricted.chmod(0o755)

@@ -225,6 +225,7 @@ class CustomDirectoryTree(DirectoryTree):
         super().__init__(path, **kwargs)
         self._original_path = path
         self._venv_cache: Dict[str, bool] = {}  # Cache for venv detection
+        self._dir_size_cache: Dict[str, int] = {}  # Cache for directory sizes
 
     def format_file_size(self, size: int) -> str:
         """Format file size in human-readable format with locale support."""
@@ -336,6 +337,48 @@ class CustomDirectoryTree(DirectoryTree):
         self._venv_cache[path_str] = result
         return result
 
+    def _get_path_from_node_data(self, data: Any) -> Optional[Path]:
+        """Extract path from node data with consistent handling."""
+        try:
+            if hasattr(data, "path"):
+                return Path(data.path)
+            else:
+                return Path(str(data))
+        except Exception:
+            return None
+
+    def calculate_directory_size(self, dir_path: Path) -> int:
+        """Calculate total size of directory recursively with caching."""
+        path_str = str(dir_path)
+
+        # Check cache first
+        if path_str in self._dir_size_cache:
+            return self._dir_size_cache[path_str]
+
+        total_size = 0
+        try:
+            for entry in dir_path.iterdir():
+                try:
+                    # Use lstat to avoid following symlinks
+                    stat_info = entry.lstat()
+                    if stat_module.S_ISREG(stat_info.st_mode):
+                        # Regular file - add its size
+                        total_size += stat_info.st_size
+                    elif stat_module.S_ISDIR(stat_info.st_mode):
+                        # Directory - recursively calculate its size
+                        total_size += self.calculate_directory_size(entry)
+                    # Skip symlinks, special files, etc.
+                except (PermissionError, OSError):
+                    # Skip files/dirs we can't access
+                    continue
+        except (PermissionError, OSError):
+            # Can't read directory
+            pass
+
+        # Cache the result
+        self._dir_size_cache[path_str] = total_size
+        return total_size
+
     def _render_root_label(self) -> Text:
         """Render the root node label with directory information."""
         try:
@@ -354,12 +397,14 @@ class CustomDirectoryTree(DirectoryTree):
             if not os.access(current_dir, os.W_OK):
                 label.append(" 🔒", style="bright_red")
 
-            # Try to get directory stats
+            # Try to get directory stats and size
             try:
                 dir_stat = current_dir.stat()
 
-                # Add directory indicator
-                label.append("  <DIR>", style="dim cyan")
+                # Calculate total directory size
+                total_size = self.calculate_directory_size(current_dir)
+                size_str = self.format_file_size(total_size)
+                label.append(f"  {size_str}", style="dim cyan")
 
                 # Add modification date
                 date_str = self.format_date(dir_stat.st_mtime)
@@ -383,10 +428,9 @@ class CustomDirectoryTree(DirectoryTree):
 
         try:
             # Get path from node data
-            if hasattr(node.data, "path"):
-                file_path = Path(node.data.path)
-            else:
-                file_path = Path(str(node.data))
+            file_path = self._get_path_from_node_data(node.data)
+            if not file_path:
+                return Text("Unknown", style="dim red")
 
             # Get file stats
             try:
@@ -444,11 +488,10 @@ class CustomDirectoryTree(DirectoryTree):
         children_info = []
         for child in node._children:
             try:
-                # child.data is a DirEntry object, get its path
-                if hasattr(child.data, "path"):
-                    path = Path(child.data.path)
-                else:
-                    path = Path(str(child.data))
+                # Get path from child data
+                path = self._get_path_from_node_data(child.data)
+                if not path:
+                    continue
                 stat = path.lstat()  # Use lstat for consistency
 
                 # Extract sort key based on mode
@@ -677,7 +720,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
                 folder_path=path if not is_file else None,
                 last_modified_datetime=datetime.fromtimestamp(stat_result.st_mtime),
                 creation_datetime=datetime.fromtimestamp(stat_result.st_ctime),
-                size_in_bytes=stat_result.st_size if is_file else None,
+                size_in_bytes=stat_result.st_size if is_file else self._calculate_dir_size(path),
                 readonly=not os.access(path, os.W_OK),
                 folder_has_venv=self._check_venv(path) if not is_file else None,
                 is_symlink=is_symlink,
@@ -694,6 +737,11 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         """Check if directory contains a virtual environment."""
         tree = self.query_one("#directory-tree", CustomDirectoryTree)
         return tree.has_venv(path)
+
+    def _calculate_dir_size(self, path: Path) -> int:
+        """Calculate directory size."""
+        tree = self.query_one("#directory-tree", CustomDirectoryTree)
+        return tree.calculate_directory_size(path)
 
     @on(DirectoryTree.NodeHighlighted)
     def on_node_highlighted(self, event: DirectoryTree.NodeHighlighted[Any]) -> None:
@@ -747,8 +795,8 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         # Get the currently highlighted node
         tree = self.query_one("#directory-tree", CustomDirectoryTree)
         if tree.cursor_node and tree.cursor_node.data:
-            path = Path(tree.cursor_node.data.path) if hasattr(tree.cursor_node.data, "path") else Path(str(tree.cursor_node.data))
-            if path.is_dir():
+            path = tree._get_path_from_node_data(tree.cursor_node.data)
+            if path and path.is_dir():
                 self._create_file_info(path, is_file=False)
 
     @on(Button.Pressed, "#parent-button")

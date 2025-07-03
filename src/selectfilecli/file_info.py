@@ -55,16 +55,16 @@ class FileInfo:
     symlink_broken: Optional[bool] = None
     """True if the item is a broken symbolic link (target doesn't exist)."""
 
-    def __iter__(self) -> Iterator[Union[str, datetime, int, bool, None]]:
+    def __iter__(self) -> Iterator[Union[Path, datetime, int, bool, None]]:
         """Allow unpacking as tuple for backward compatibility.
 
         Returns values in the order specified by the user:
         (file_path, folder_path, last_modified_datetime, creation_datetime,
          size_in_bytes, readonly, folder_has_venv, is_symlink, symlink_broken)
         """
-        return iter((str(self.file_path) if self.file_path else None, str(self.folder_path) if self.folder_path else None, self.last_modified_datetime, self.creation_datetime, self.size_in_bytes, self.readonly, self.folder_has_venv, self.is_symlink, self.symlink_broken))
+        return iter((self.file_path, self.folder_path, self.last_modified_datetime, self.creation_datetime, self.size_in_bytes, self.readonly, self.folder_has_venv, self.is_symlink, self.symlink_broken))
 
-    def as_tuple(self) -> Tuple[Union[str, datetime, int, bool, None], ...]:
+    def as_tuple(self) -> Tuple[Union[Path, datetime, int, bool, None], ...]:
         """Convert to tuple representation."""
         return tuple(self)
 
