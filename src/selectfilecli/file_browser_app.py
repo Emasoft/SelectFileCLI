@@ -26,6 +26,13 @@
 # - Add lock emoji 🔒 for read-only files
 # - Add link emoji 🔗 for symlinks
 # - Smart date formatting (time for today, month/day for this year, year otherwise)
+# - Updated datetime to fixed 24h format: 📆YYYY-MM-DD 🕚HH:MM:SS
+# - Enhanced file size formatting with locale support and thousand separators
+# - Added emoji icons to navigation buttons with underlined keyboard shortcuts
+# - Added 'r' keyboard binding for root navigation
+# - Implemented ls-style visual cues: colors, suffixes (/, *, @, |, =), quoted filenames
+# - Added root node label with directory information
+# - Added ✨ emoji for directories containing Python virtual environments
 #
 
 """Textual-based file browser application."""
@@ -34,6 +41,7 @@ import os
 import platform
 import stat
 import sys
+import locale
 from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Tuple
@@ -55,6 +63,13 @@ FILE_SIZE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"]
 DEFAULT_DIR_SIZE = 0
 ASCENDING_ORDER_INDEX = 0
 WINDOWS_DRIVE_LETTERS = "CDEFGHIJKLMNOPQRSTUVWXYZAB"  # C first, then others
+
+# Set up locale for number formatting
+try:
+    locale.setlocale(locale.LC_ALL, "")
+except locale.Error:
+    # Fallback to C locale if system locale is not available
+    locale.setlocale(locale.LC_ALL, "C")
 
 
 class SortMode(Enum):
@@ -201,40 +216,149 @@ class CustomDirectoryTree(DirectoryTree):
         self._original_path = path
 
     def format_file_size(self, size: int) -> str:
-        """Format file size in human-readable format."""
+        """Format file size in human-readable format with locale support."""
+        if size == 0:
+            return "0B"
+
         size_float = float(size)
         for unit in FILE_SIZE_UNITS[:-1]:  # All units except PB
             if size_float < FILE_SIZE_UNIT:
                 if unit == "B":
-                    return f"{int(size_float)} {unit}"
-                return f"{size_float:.1f} {unit}"
+                    # For bytes, use integer with thousand separators
+                    try:
+                        return f"{locale.format_string('%d', int(size_float), grouping=True)}B"
+                    except Exception:
+                        return f"{int(size_float):,}B"
+                else:
+                    # For other units, use 2 decimal places
+                    try:
+                        return f"{locale.format_string('%.2f', size_float, grouping=True)}{unit}"
+                    except Exception:
+                        return f"{size_float:,.2f}{unit}"
             size_float /= FILE_SIZE_UNIT
         # If we get here, it's in PB
-        return f"{size_float:.1f} {FILE_SIZE_UNITS[-1]}"
+        try:
+            return f"{locale.format_string('%.2f', size_float, grouping=True)}{FILE_SIZE_UNITS[-1]}"
+        except Exception:
+            return f"{size_float:,.2f}{FILE_SIZE_UNITS[-1]}"
 
     def format_date(self, timestamp: float) -> str:
-        """Format timestamp as readable date."""
+        """Format timestamp as readable date with emoji in 24h format."""
         dt = datetime.fromtimestamp(timestamp)
-        now = datetime.now()
+        # Fixed format: 📆YYYY-MM-DD 🕚HH:MM:SS
+        return f"📆{dt.strftime('%Y-%m-%d')} 🕚{dt.strftime('%H:%M:%S')}"
 
-        # If today, show time only
-        if dt.date() == now.date():
-            return dt.strftime("%I:%M %p")
-        # If this year, show month and day
-        elif dt.year == now.year:
-            return dt.strftime("%b %d")
-        # Otherwise show year
-        else:
-            return dt.strftime("%Y")
+    def get_file_color_and_suffix(self, path: Path, file_stat: os.stat_result) -> Tuple[str, str]:
+        """Get color style and suffix for file based on type (similar to ls -F --color).
+
+        Returns:
+            Tuple of (color_style, suffix)
+        """
+        # Check symlink first
+        if path.is_symlink():
+            try:
+                # Check if symlink is broken
+                path.stat()
+                return "bright_cyan", "@"
+            except (OSError, IOError):
+                return "bright_red", "@"
+
+        # Directory
+        if path.is_dir():
+            return "bright_blue", "/"
+
+        # Check if executable
+        if file_stat.st_mode & (stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH):
+            return "bright_green", "*"
+
+        # Socket
+        if stat.S_ISSOCK(file_stat.st_mode):
+            return "yellow", "="
+
+        # Named pipe (FIFO)
+        if stat.S_ISFIFO(file_stat.st_mode):
+            return "cyan", "|"
+
+        # Check extensions for special coloring
+        ext = path.suffix.lower()
+        if ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp", ".svg"]:
+            return "magenta", ""
+        elif ext in [".tar", ".gz", ".zip", ".7z", ".rar", ".bz2"]:
+            return "bright_red", ""
+        elif ext in [".mp3", ".mp4", ".avi", ".mkv", ".wav", ".flac"]:
+            return "bright_magenta", ""
+
+        # Regular file
+        return "white", ""
+
+    def format_filename_with_quotes(self, filename: str) -> str:
+        """Add quotes around filenames with spaces or special characters."""
+        # Characters that require quoting
+        special_chars = " \t\n\r!$&'()*,:;<=>?@[\\]^`{|}~"
+
+        if any(char in filename for char in special_chars):
+            # Escape existing quotes and backslashes
+            escaped = filename.replace("\\", "\\\\").replace('"', '\\"')
+            return f'"{escaped}"'
+        return filename
+
+    def has_venv(self, dir_path: Path) -> bool:
+        """Check if directory contains a Python virtual environment."""
+        if not dir_path.is_dir():
+            return False
+
+        # Common venv indicators
+        venv_indicators = ["pyvenv.cfg", "bin/activate", "Scripts/activate.bat", "bin/python", "Scripts/python.exe"]
+
+        for indicator in venv_indicators:
+            if (dir_path / indicator).exists():
+                return True
+        return False
+
+    def _render_root_label(self) -> Text:
+        """Render the root node label with directory information."""
+        try:
+            current_dir = Path(self._original_path)
+            label = Text()
+
+            # Directory name with proper formatting
+            dir_name = self.format_filename_with_quotes(current_dir.name or str(current_dir))
+            label.append(f"{dir_name}/", style="bright_blue bold")
+
+            # Add venv indicator
+            if self.has_venv(current_dir):
+                label.append(" ✨", style="bright_yellow")
+
+            # Add read-only indicator
+            if not os.access(current_dir, os.W_OK):
+                label.append(" 🔒", style="bright_red")
+
+            # Try to get directory stats
+            try:
+                dir_stat = current_dir.stat()
+
+                # Add directory indicator
+                label.append("  <DIR>", style="dim cyan")
+
+                # Add modification date
+                date_str = self.format_date(dir_stat.st_mtime)
+                label.append(f"  {date_str}", style="dim yellow")
+            except Exception:
+                pass
+
+            return label
+        except Exception:
+            return Text("Current Directory", style="bright_blue bold")
 
     def render_label(self, node: Any, base_style: Any, style: Any) -> Text:
         """Render node label with additional file information."""
-        # Get the default label
-        label = super().render_label(node, base_style, style)
+        # Skip if no data
+        if not node.data:
+            return Text("Unknown")
 
-        # Skip if this is the root node or no data
-        if not node.data or node.parent is None:
-            return label
+        # Special handling for root node
+        if node.parent is None:
+            return self._render_root_label()
 
         try:
             # Get path from node data
@@ -246,26 +370,37 @@ class CustomDirectoryTree(DirectoryTree):
             # Get file stats
             try:
                 file_stat = file_path.lstat()  # Use lstat to not follow symlinks
-                is_symlink = file_path.is_symlink()
+                is_dir = file_path.is_dir()
             except (OSError, PermissionError):
-                return label
+                # Return simple label if we can't access
+                return Text(file_path.name, style="dim red")
+
+            # Get color and suffix based on file type
+            color_style, suffix = self.get_file_color_and_suffix(file_path, file_stat)
 
             # Create new label with file info
             new_label = Text()
 
-            # Add original label (file/folder name)
-            new_label.append(file_path.name)
+            # Format filename with quotes if needed
+            filename = self.format_filename_with_quotes(file_path.name)
 
-            # Add symlink indicator
-            if is_symlink:
-                new_label.append(" 🔗", style="cyan")
+            # Add filename with color and suffix
+            new_label.append(filename, style=color_style)
+            if suffix:
+                new_label.append(suffix, style=color_style)
+
+            # Add venv indicator for directories
+            if is_dir and self.has_venv(file_path):
+                new_label.append(" ✨", style="bright_yellow")
 
             # Add lock icon for read-only files
             if not os.access(file_path, os.W_OK):
-                new_label.append(" 🔒", style="red")
+                new_label.append(" 🔒", style="bright_red")
 
-            # Add file size for regular files
-            if file_path.is_file() and not is_symlink:
+            # Add file size
+            if is_dir:
+                new_label.append("  <DIR>", style="dim cyan")
+            else:
                 size_str = self.format_file_size(file_stat.st_size)
                 new_label.append(f"  {size_str}", style="dim cyan")
 
@@ -276,8 +411,8 @@ class CustomDirectoryTree(DirectoryTree):
             return new_label
 
         except Exception:
-            # If anything goes wrong, return the original label
-            return label
+            # If anything goes wrong, return a simple label
+            return Text(str(node.data), style="dim red")
 
     def sort_children_by_mode(self, node: Any) -> None:
         """Sort children of a node based on current sort settings."""
@@ -415,6 +550,7 @@ class FileBrowserApp(App[Optional[str]]):
         Binding("u", "go_parent", "Up", show=True),
         Binding("backspace", "go_parent", "Parent"),
         Binding("h", "go_home", "Home", show=True),
+        Binding("r", "go_root", "Root", show=True),
     ]
 
     def __init__(self, start_path: str = "."):
@@ -444,9 +580,9 @@ class FileBrowserApp(App[Optional[str]]):
         """Create child widgets for the app."""
         yield Header()
         with Horizontal(id="navigation-bar"):
-            yield Button("↑ Parent", id="parent-button", variant="primary")
-            yield Button("⌂ Home", id="home-button", variant="default")
-            yield Button("/ Root", id="root-button", variant="default")
+            yield Button("🔼 [u]P[/u]arent", id="parent-button", variant="primary")
+            yield Button("🏠 [u]H[/u]ome", id="home-button", variant="default")
+            yield Button("⏫ [u]R[/u]oot", id="root-button", variant="default")
         yield Label("", id="path-display")
         with Vertical(id="tree-container"):
             yield CustomDirectoryTree(str(self.start_path), id="directory-tree")
@@ -513,6 +649,10 @@ class FileBrowserApp(App[Optional[str]]):
         """Navigate to home directory."""
         home = Path.home()
         await self._change_directory(home)
+
+    async def action_go_root(self) -> None:
+        """Navigate to root directory."""
+        await self.on_root_button()
 
     @on(Button.Pressed, "#parent-button")
     async def on_parent_button(self) -> None:
