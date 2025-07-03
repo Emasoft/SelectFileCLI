@@ -57,5 +57,3 @@ def select_file(start_path: Optional[str] = None) -> Optional[str]:
 
 __all__ = ["select_file"]
 __version__ = "0.3.0-alpha"
-
-# Test comment to verify sequential pre-commit with three-layer defense
