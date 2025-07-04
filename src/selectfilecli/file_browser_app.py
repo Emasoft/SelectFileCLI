@@ -576,7 +576,7 @@ class CustomDirectoryTree(DirectoryTree):
             return
 
         # Initialize widths
-        max_filename_width = FILENAME_MIN_WIDTH
+        max_filename_width = 0  # Start from 0 to find actual max
         max_size_width = SIZE_COLUMN_WIDTH
 
         # Analyze all visible children
@@ -595,8 +595,8 @@ class CustomDirectoryTree(DirectoryTree):
                 color_style, suffix = self.get_file_color_and_suffix(path, file_stat)
                 full_filename = filename + suffix
 
-                # Update max filename width (but cap it)
-                max_filename_width = min(max(max_filename_width, len(full_filename)), 80)
+                # Update max filename width (no minimum, just actual max)
+                max_filename_width = max(max_filename_width, len(full_filename))
 
                 # Update size width
                 if path.is_file():
@@ -604,6 +604,9 @@ class CustomDirectoryTree(DirectoryTree):
                     max_size_width = max(max_size_width, len(size_str))
             except (OSError, AttributeError):
                 continue
+
+        # Add 1 character padding after the longest filename
+        max_filename_width = max_filename_width + 1 if max_filename_width > 0 else FILENAME_MIN_WIDTH
 
         # Store calculated widths
         self._column_widths = {"filename": max_filename_width, "size": max_size_width, "date": DATE_COLUMN_WIDTH, "indicators": INDICATOR_COLUMN_WIDTH}
@@ -677,29 +680,18 @@ class CustomDirectoryTree(DirectoryTree):
         # Determine if we should show date column based on available width
         show_date = available_width > 60  # Only show date if we have enough space
 
-        # Calculate column widths dynamically
-        if show_date:
+        # Use pre-calculated column widths if available
+        if hasattr(self, "_column_widths") and self._column_widths:
+            filename_width = self._column_widths.get("filename", FILENAME_MIN_WIDTH)
+            size_width = self._column_widths.get("size", SIZE_COLUMN_WIDTH)
+            date_width = self._column_widths.get("date", DATE_COLUMN_WIDTH)
+            indicator_width = 4 if indicators else 0
+        else:
+            # Fallback to default widths
+            filename_width = FILENAME_MIN_WIDTH
             size_width = SIZE_COLUMN_WIDTH
             date_width = DATE_COLUMN_WIDTH
             indicator_width = 4 if indicators else 0
-
-            # Calculate fixed width including all columns
-            fixed_width = size_width + COLUMN_SPACING
-            if show_date:
-                fixed_width += date_width + COLUMN_SPACING
-            if indicators:
-                fixed_width += indicator_width + COLUMN_SPACING
-
-            # Filename gets remaining space
-            filename_width = max(15, available_width - fixed_width)
-        else:
-            # For narrow terminals, only show filename and size
-            size_width = SIZE_COLUMN_WIDTH
-            indicator_width = 4 if indicators else 0
-            fixed_width = size_width + COLUMN_SPACING
-            if indicators:
-                fixed_width += indicator_width + COLUMN_SPACING
-            filename_width = max(15, available_width - fixed_width)
 
         # Create formatted text
         formatted = Text()
@@ -716,8 +708,8 @@ class CustomDirectoryTree(DirectoryTree):
         # Add spacing
         formatted.append(" " * COLUMN_SPACING)
 
-        # Add size column
-        formatted.append(size.ljust(size_width), style=size_style)
+        # Add size column (right-aligned for numbers)
+        formatted.append(size.rjust(size_width), style=size_style)
 
         # Add date column only if space permits
         if show_date:
@@ -941,22 +933,6 @@ class CustomDirectoryTree(DirectoryTree):
         loading_node = node.add_leaf("", data=DirEntry(Path("<...loading...>")))
         return loading_node
 
-    async def _on_tree_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
-        """Called when a node is expanded, before loading starts.
-
-        This is called by Tree when a node is expanded.
-        """
-        node = event.node
-        if node.data and not node.children:
-            # Show loading placeholder
-            path = self._get_path_from_node_data(node.data)
-            if path and path.is_dir():
-                self._add_loading_placeholder(node)
-                self.refresh()
-
-        # Call parent implementation to trigger loading
-        await super()._on_tree_node_expanded(event)
-
     def _populate_node(self, node: TreeNode[DirEntry], content: Iterable[Path]) -> None:
         """Populate the given tree node with the given directory content.
 
@@ -1141,11 +1117,18 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         self.current_sort_order = SortOrder.ASCENDING
         self.current_path = self.start_path
 
+        # Navigation history
+        self.navigation_history: list[Path] = [self.start_path]
+        self.history_position: int = 0
+        self.max_history_size: int = 50
+
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
         with Vertical(id="main-container"):
             with Horizontal(id="navigation-bar"):
+                yield Button("◀ Back", id="back-button", variant="default")
+                yield Button("▶ Forward", id="forward-button", variant="default")
                 yield Button("🔼 [u]P[/u]arent", id="parent-button", variant="primary")
                 yield Button("🏠 [u]H[/u]ome", id="home-button", variant="default")
                 yield Button("⏫ [u]R[/u]oot", id="root-button", variant="default")
@@ -1164,6 +1147,9 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
         # Update path display for root
         self._update_path_display(str(self.start_path))
+
+        # Update navigation button states
+        self._update_navigation_buttons()
 
     @on(DirectoryTree.FileSelected)
     def on_file_selected(self, event: DirectoryTree.FileSelected) -> None:
@@ -1267,6 +1253,19 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         path_str = str(path) if path else ""
         path_label.update(f"Path: {path_str}")
 
+    def _update_navigation_buttons(self) -> None:
+        """Update the enabled state of navigation buttons based on history."""
+        try:
+            back_button = self.query_one("#back-button", Button)
+            forward_button = self.query_one("#forward-button", Button)
+
+            # Enable/disable based on history position
+            back_button.disabled = self.history_position <= 0
+            forward_button.disabled = self.history_position >= len(self.navigation_history) - 1
+        except Exception:
+            # Buttons might not be mounted yet
+            pass
+
     async def action_quit(self) -> None:
         """Cancel the file selection and exit without selecting."""
         # Create a FileInfo with all None values for cancellation
@@ -1284,36 +1283,38 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         )
         self.exit(cancel_info)
 
-    async def action_show_sort_dialog(self) -> None:
+    def action_show_sort_dialog(self) -> None:
         """Show the sort options dialog."""
+
+        def handle_dialog_result(result: Any) -> None:
+            if result:
+                # Update sort settings
+                self.current_sort_mode, self.current_sort_order = result
+
+                # Update the tree's sort settings
+                tree = self.query_one("#directory-tree", CustomDirectoryTree)
+                tree.set_sort_mode(self.current_sort_mode)
+                tree.set_sort_order(self.current_sort_order)
+
         dialog = SortDialog(self.current_sort_mode, self.current_sort_order)
-        result = await self.push_screen(dialog)  # type: ignore[func-returns-value]
+        self.push_screen(dialog, handle_dialog_result)
 
-        if result:
-            # Update sort settings
-            self.current_sort_mode, self.current_sort_order = result
-
-            # Update the tree's sort settings
-            tree = self.query_one("#directory-tree", CustomDirectoryTree)
-            tree.set_sort_mode(self.current_sort_mode)
-            tree.set_sort_order(self.current_sort_order)
-
-    async def action_go_parent(self) -> None:
+    def action_go_parent(self) -> None:
         """Navigate to parent directory."""
         parent = self.current_path.parent
         if parent != self.current_path:  # Check we're not already at root
-            await self._change_directory(parent)
+            self.call_after_refresh(self._change_directory, parent)
 
-    async def action_go_home(self) -> None:
+    def action_go_home(self) -> None:
         """Navigate to home directory."""
         home = Path.home()
-        await self._change_directory(home)
+        self.call_after_refresh(self._change_directory, home)
 
-    async def action_go_root(self) -> None:
+    def action_go_root(self) -> None:
         """Navigate to root directory."""
-        await self.on_root_button()
+        self.call_after_refresh(self.on_root_button)
 
-    async def action_select_current_directory(self) -> None:
+    def action_select_current_directory(self) -> None:
         """Select the current highlighted directory."""
         if not self.select_dirs:
             return
@@ -1325,7 +1326,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             if path and path.is_dir():
                 self._create_file_info(path, is_file=False)
 
-    async def action_navigate_or_select(self) -> None:
+    def action_navigate_or_select(self) -> None:
         """Navigate into directory with Enter key or select file."""
         tree = self.query_one("#directory-tree", CustomDirectoryTree)
         if not tree.cursor_node or not tree.cursor_node.data:
@@ -1336,21 +1337,21 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             return
 
         if path.is_dir():
-            # Navigate into the directory - use post_message to avoid blocking
-            await self._change_directory(path)
+            # Navigate into the directory
+            self.call_after_refresh(self._change_directory, path)
         elif path.is_file() and self.select_files:
             # Select the file
             self._create_file_info(path, is_file=True)
 
     @on(Button.Pressed, "#parent-button")
-    async def on_parent_button(self) -> None:
+    def on_parent_button(self) -> None:
         """Handle parent button click."""
-        await self.action_go_parent()
+        self.action_go_parent()
 
     @on(Button.Pressed, "#home-button")
-    async def on_home_button(self) -> None:
+    def on_home_button(self) -> None:
         """Handle home button click."""
-        await self.action_go_home()
+        self.action_go_home()
 
     @on(Button.Pressed, "#root-button")
     async def on_root_button(self) -> None:
@@ -1380,12 +1381,48 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         else:  # Unix-like
             await self._change_directory(Path("/"))
 
-    async def _change_directory(self, new_path: Path) -> None:
+    @on(Button.Pressed, "#back-button")
+    def on_back_button(self) -> None:
+        """Handle back button click - navigate to previous directory in history."""
+        if self.history_position > 0:
+            self.history_position -= 1
+            self.call_after_refresh(self._change_directory, self.navigation_history[self.history_position], add_to_history=False)
+
+    @on(Button.Pressed, "#forward-button")
+    def on_forward_button(self) -> None:
+        """Handle forward button click - navigate to next directory in history."""
+        if self.history_position < len(self.navigation_history) - 1:
+            self.history_position += 1
+            self.call_after_refresh(self._change_directory, self.navigation_history[self.history_position], add_to_history=False)
+
+    async def _change_directory(self, new_path: Path, add_to_history: bool = True) -> None:
         """Change the current directory and refresh the tree."""
         if not new_path.exists() or not new_path.is_dir():
             return
 
+        # Don't navigate to the same directory
+        if new_path == self.current_path:
+            return
+
         self.current_path = new_path
+
+        # Manage navigation history
+        if add_to_history:
+            # Remove any forward history when navigating to a new location
+            if self.history_position < len(self.navigation_history) - 1:
+                self.navigation_history = self.navigation_history[: self.history_position + 1]
+
+            # Add new path to history
+            self.navigation_history.append(new_path)
+
+            # Limit history size
+            if len(self.navigation_history) > self.max_history_size:
+                self.navigation_history.pop(0)
+            else:
+                self.history_position += 1
+
+        # Update button states
+        self._update_navigation_buttons()
 
         # Get the container
         container = self.query_one("#tree-container")
