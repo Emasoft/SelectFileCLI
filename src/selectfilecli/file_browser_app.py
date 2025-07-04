@@ -70,6 +70,9 @@
 # - Calculate column width based on longest filename + 1 character padding
 # - Added loading indicator during navigation operations using container.loading
 # - Show visual feedback when changing directories
+# - Removed unused methods: _add_loading_placeholder, on_directory_tree_directory_selected, on_key
+# - Added keyboard shortcuts Alt+Left for back and Alt+Right for forward navigation
+# - Improved on_tree_node_expanded to apply sorting after node population
 #
 
 """Textual-based file browser application."""
@@ -899,46 +902,12 @@ class CustomDirectoryTree(DirectoryTree):
         # Force a full refresh to redraw with new column widths
         self.refresh()
 
-    def on_directory_tree_directory_selected(self, event: Any) -> None:
-        """Handle directory selection - either select it or expand/collapse."""
-        # This is handled by the app's on_directory_selected method now
-        pass
-
     def on_tree_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
-        """Handle when a tree node is expanded.
-
-        DirectoryTree handles async loading automatically, but we add visual feedback.
-        """
+        """Handle when a tree node is expanded to ensure proper sorting."""
         node = event.node
-        if node and node.data and not node.children:
-            # DirectoryTree will populate this automatically
-            # We just ensure proper sorting after population
-            pass
-
-    def on_key(self, event: Any) -> None:
-        """Handle key events in the directory tree."""
-        if event.key == "enter" and self.cursor_node:
-            # Check if we're on a directory
-            path = self._get_path_from_node_data(self.cursor_node.data)
-            if path and path.is_dir():
-                # Check if we should navigate into it
-                # For now, let the default behavior handle it
-                pass
-
-    def _add_loading_placeholder(self, node: TreeNode[DirEntry]) -> TreeNode[DirEntry]:
-        """Add a loading placeholder to a node.
-
-        Args:
-            node: The node to add the placeholder to.
-
-        Returns:
-            The loading placeholder node.
-        """
-        # Remove existing children first
-        node.remove_children()
-        # Add loading placeholder with special data
-        loading_node = node.add_leaf("", data=DirEntry(Path("<...loading...>")))
-        return loading_node
+        if node and hasattr(node, "_children") and node._children:
+            # Apply sorting after the node is populated
+            self.sort_children_by_mode(node)
 
     def _populate_node(self, node: TreeNode[DirEntry], content: Iterable[Path]) -> None:
         """Populate the given tree node with the given directory content.
@@ -1073,6 +1042,8 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         Binding("r", "go_root", "Root", show=True),
         Binding("d", "select_current_directory", "Select Dir", show=False),
         Binding("enter", "navigate_or_select", "Navigate/Select", show=False),
+        Binding("alt+left", "go_back", "Back", show=False),
+        Binding("alt+right", "go_forward", "Forward", show=False),
     ]
 
     def __init__(self, start_path: str = ".", select_files: bool = True, select_dirs: bool = False):
@@ -1349,6 +1320,18 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         elif path.is_file() and self.select_files:
             # Select the file
             self._create_file_info(path, is_file=True)
+
+    def action_go_back(self) -> None:
+        """Navigate to previous directory in history (Alt+Left)."""
+        if self.history_position > 0:
+            self.history_position -= 1
+            self._change_directory(self.navigation_history[self.history_position], add_to_history=False)
+
+    def action_go_forward(self) -> None:
+        """Navigate to next directory in history (Alt+Right)."""
+        if self.history_position < len(self.navigation_history) - 1:
+            self.history_position += 1
+            self._change_directory(self.navigation_history[self.history_position], add_to_history=False)
 
     @on(Button.Pressed, "#parent-button")
     def on_parent_button(self) -> None:
