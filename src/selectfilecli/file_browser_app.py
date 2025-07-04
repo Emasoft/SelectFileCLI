@@ -73,6 +73,10 @@
 # - Removed unused methods: _add_loading_placeholder, on_directory_tree_directory_selected, on_key
 # - Added keyboard shortcuts Alt+Left for back and Alt+Right for forward navigation
 # - Improved on_tree_node_expanded to apply sorting after node population
+# - Fixed duplicate button handler implementations - button handlers now call action methods
+# - Fixed column alignment to be fully left-aligned (size and date columns)
+# - Fixed emoji visual width calculation breaking column alignment
+# - Added loading indicator during tree node expansion
 #
 
 """Textual-based file browser application."""
@@ -605,8 +609,16 @@ class CustomDirectoryTree(DirectoryTree):
                 color_style, suffix = self.get_file_color_and_suffix(path, file_stat)
                 full_filename = filename + suffix
 
-                # Update max filename width (no minimum, just actual max)
-                max_filename_width = max(max_filename_width, len(full_filename))
+                # Update max filename width accounting for visual width (emojis take 2 chars)
+                # Count visual width properly for emojis and special chars
+                visual_width = 0
+                for char in full_filename:
+                    # Emojis and some unicode chars take 2 display columns
+                    if ord(char) > 0x1F000 or char in "✨🔒🔗":
+                        visual_width += 2
+                    else:
+                        visual_width += 1
+                max_filename_width = max(max_filename_width, visual_width)
 
                 # Update size width
                 if path.is_file():
@@ -718,13 +730,13 @@ class CustomDirectoryTree(DirectoryTree):
         # Add spacing
         formatted.append(" " * COLUMN_SPACING)
 
-        # Add size column (right-aligned for numbers)
-        formatted.append(size.rjust(size_width), style=size_style)
+        # Add size column (left-aligned as requested)
+        formatted.append(size.ljust(size_width), style=size_style)
 
         # Add date column only if space permits
         if show_date:
             formatted.append(" " * COLUMN_SPACING)
-            formatted.append(date, style=date_style)
+            formatted.append(date.ljust(date_width), style=date_style)
 
         # Add indicators if present
         if indicators:
@@ -906,8 +918,16 @@ class CustomDirectoryTree(DirectoryTree):
         """Handle when a tree node is expanded to ensure proper sorting."""
         node = event.node
         if node and hasattr(node, "_children") and node._children:
-            # Apply sorting after the node is populated
-            self.sort_children_by_mode(node)
+            # Show loading indicator while sorting
+            container = self.query_one("#tree-container")
+            container.loading = True
+
+            # Use call_after_refresh to apply sorting after UI update
+            def apply_sorting() -> None:
+                self.sort_children_by_mode(node)
+                container.loading = False
+
+            self.call_after_refresh(apply_sorting)
 
     def _populate_node(self, node: TreeNode[DirEntry], content: Iterable[Path]) -> None:
         """Populate the given tree node with the given directory content.
@@ -1374,16 +1394,12 @@ class FileBrowserApp(App[Optional[FileInfo]]):
     @on(Button.Pressed, "#back-button")
     def on_back_button(self) -> None:
         """Handle back button click - navigate to previous directory in history."""
-        if self.history_position > 0:
-            self.history_position -= 1
-            self._change_directory(self.navigation_history[self.history_position], add_to_history=False)
+        self.action_go_back()
 
     @on(Button.Pressed, "#forward-button")
     def on_forward_button(self) -> None:
         """Handle forward button click - navigate to next directory in history."""
-        if self.history_position < len(self.navigation_history) - 1:
-            self.history_position += 1
-            self._change_directory(self.navigation_history[self.history_position], add_to_history=False)
+        self.action_go_forward()
 
     def _change_directory(self, new_path: Path, add_to_history: bool = True) -> None:
         """Change the current directory and refresh the tree."""
