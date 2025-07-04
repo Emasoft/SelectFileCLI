@@ -117,4 +117,4 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
 
 
 __all__ = ["select_file", "FileInfo"]
-__version__ = "0.4.2"  # Follow semantic versioning
+__version__ = "0.4.3"  # Follow semantic versioning

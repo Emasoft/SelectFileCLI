@@ -662,6 +662,22 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         layout: vertical;
     }
 
+    #navigation-bar {
+        height: 3;
+        background: $boost;
+        padding: 0 1;
+        width: 100%;
+        layout: horizontal;
+    }
+
+    #path-display {
+        background: $surface;
+        color: yellow;
+        padding: 0 1;
+        height: 1;
+        width: 100%;
+    }
+
     #tree-container {
         width: 100%;
         height: 1fr;
@@ -674,24 +690,6 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         border: solid $primary;
         width: 100%;
         height: 100%;
-    }
-
-    #path-display {
-        background: $surface;
-        color: yellow;
-        padding: 0 1;
-        height: 1;
-        width: 100%;
-        dock: top;
-    }
-
-    #navigation-bar {
-        height: 3;
-        background: $boost;
-        padding: 0 1;
-        width: 100%;
-        layout: horizontal;
-        dock: top;
     }
 
     #navigation-bar Button {
@@ -721,6 +719,22 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             select_dirs: Whether to allow directory selection.
         """
         super().__init__()
+
+        # Set title and subtitle immediately
+        self.title = "Select File Browser"
+
+        # Update subtitle based on what can be selected
+        select_types = []
+        if select_files:
+            select_types.append("files")
+        if select_dirs:
+            select_types.append("folders")
+        select_text = " or ".join(select_types)
+        if select_dirs:
+            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, D to select dir, Q to quit"
+        else:
+            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, Q to quit"
+
         # Validate start path
         try:
             path = Path(start_path).resolve()
@@ -755,19 +769,6 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
     def on_mount(self) -> None:
         """Called when the app is mounted."""
-        self.title = "Select File Browser"
-        # Update subtitle based on what can be selected
-        select_types = []
-        if self.select_files:
-            select_types.append("files")
-        if self.select_dirs:
-            select_types.append("folders")
-        select_text = " or ".join(select_types)
-        if self.select_dirs:
-            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, D to select dir, Q to quit"
-        else:
-            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, Q to quit"
-
         # Set initial focus to directory tree
         tree = self.query_one("#directory-tree", CustomDirectoryTree)
         tree.allow_file_select = self.select_files
