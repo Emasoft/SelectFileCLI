@@ -76,7 +76,6 @@
 # - Fixed duplicate button handler implementations - button handlers now call action methods
 # - Fixed column alignment to be fully left-aligned (size and date columns)
 # - Fixed emoji visual width calculation breaking column alignment
-# - Added loading indicator during tree node expansion
 #
 
 """Textual-based file browser application."""
@@ -918,16 +917,8 @@ class CustomDirectoryTree(DirectoryTree):
         """Handle when a tree node is expanded to ensure proper sorting."""
         node = event.node
         if node and hasattr(node, "_children") and node._children:
-            # Show loading indicator while sorting
-            container = self.query_one("#tree-container")
-            container.loading = True
-
-            # Use call_after_refresh to apply sorting after UI update
-            def apply_sorting() -> None:
-                self.sort_children_by_mode(node)
-                container.loading = False
-
-            self.call_after_refresh(apply_sorting)
+            # Apply sorting after the node is populated
+            self.sort_children_by_mode(node)
 
     def _populate_node(self, node: TreeNode[DirEntry], content: Iterable[Path]) -> None:
         """Populate the given tree node with the given directory content.
