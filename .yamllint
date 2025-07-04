@@ -1,0 +1,19 @@
+extends: default
+
+rules:
+  # Match yamlfmt settings
+  indentation:
+    spaces: 2
+    indent-sequences: false  # Don't add extra indent for list items
+
+  line-length:
+    max: 120
+    level: warning
+
+  # Allow some flexibility for GitHub Actions
+  truthy:
+    allowed-values: ['true', 'false', 'on']
+
+  # Disable some overly strict rules
+  document-start: disable
+  comments-indentation: disable
