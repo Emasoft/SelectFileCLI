@@ -141,7 +141,7 @@ class TestFileBrowserApp:
         async with app.run_test() as pilot:
             assert pilot.app.title == "Select File Browser"
             # Default is select_files=True, select_dirs=False
-            assert pilot.app.sub_title == "Navigate with arrows, Enter to select files, Q to quit"
+            assert pilot.app.sub_title == "Navigate with arrows, Enter to select files, Q to cancel"
 
     @pytest.mark.asyncio
     async def test_app_title_with_folder_selection(self, temp_directory):
@@ -149,23 +149,27 @@ class TestFileBrowserApp:
         app = FileBrowserApp(start_path=str(temp_directory), select_files=True, select_dirs=True)
         async with app.run_test() as pilot:
             assert pilot.app.title == "Select File Browser"
-            assert pilot.app.sub_title == "Navigate with arrows, Enter to select files or folders, D to select dir, Q to quit"
+            assert pilot.app.sub_title == "Navigate with arrows, Enter to select files or folders, D to select dir, Q to cancel"
 
     @pytest.mark.asyncio
     async def test_quit_action(self, temp_directory):
-        """Test that pressing 'q' quits the app without selecting."""
+        """Test that pressing 'q' cancels and returns FileInfo with all None values."""
         app = FileBrowserApp(start_path=str(temp_directory))
         async with app.run_test() as pilot:
             await pilot.press("q")
-            assert pilot.app.return_value is None
+            result = pilot.app.return_value
+            assert isinstance(result, FileInfo)
+            assert all(value is None for value in result.as_tuple())
 
     @pytest.mark.asyncio
     async def test_escape_quit(self, temp_directory):
-        """Test that pressing Escape quits the app."""
+        """Test that pressing Escape cancels and returns FileInfo with all None values."""
         app = FileBrowserApp(start_path=str(temp_directory))
         async with app.run_test() as pilot:
             await pilot.press("escape")
-            assert pilot.app.return_value is None
+            result = pilot.app.return_value
+            assert isinstance(result, FileInfo)
+            assert all(value is None for value in result.as_tuple())
 
     @pytest.mark.asyncio
     async def test_directory_tree_navigation(self, temp_directory):

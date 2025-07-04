@@ -105,6 +105,12 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
     if result is None:
         return None
 
+    # Check if this is a cancellation (all fields are None)
+    if isinstance(result, FileInfo):
+        # Check if all fields are None (cancellation)
+        if all(value is None for value in result.as_tuple()):
+            return None
+
     # For backward compatibility, return string if only files are selectable
     # and return_info is False
     if not return_info and isinstance(result, FileInfo):
@@ -117,4 +123,4 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
 
 
 __all__ = ["select_file", "FileInfo"]
-__version__ = "0.4.3"  # Follow semantic versioning
+__version__ = "0.4.4"  # Follow semantic versioning

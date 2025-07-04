@@ -1046,8 +1046,8 @@ class FileBrowserApp(App[Optional[FileInfo]]):
     """
 
     BINDINGS = [
-        Binding("q", "quit", "Quit", priority=True),
-        Binding("escape", "quit", "Quit"),
+        Binding("q", "quit", "Cancel", priority=True),
+        Binding("escape", "quit", "Cancel"),
         Binding("s", "show_sort_dialog", "Sort", show=True),
         Binding("u", "go_parent", "Up", show=True),
         Binding("backspace", "go_parent", "Parent"),
@@ -1078,9 +1078,9 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             select_types.append("folders")
         select_text = " or ".join(select_types)
         if select_dirs:
-            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, D to select dir, Q to quit"
+            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, D to select dir, Q to cancel"
         else:
-            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, Q to quit"
+            self.sub_title = f"Navigate with arrows, Enter to select {select_text}, Q to cancel"
 
         # Validate start path
         try:
@@ -1223,8 +1223,20 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         path_label.update(f"Path: {path_str}")
 
     async def action_quit(self) -> None:
-        """Quit the application without selecting a file."""
-        self.exit(None)
+        """Cancel the file selection and exit without selecting."""
+        # Create a FileInfo with all None values for cancellation
+        cancel_info = FileInfo(
+            file_path=None,
+            folder_path=None,
+            last_modified_datetime=None,
+            creation_datetime=None,
+            size_in_bytes=None,
+            readonly=None,
+            folder_has_venv=None,
+            is_symlink=None,
+            symlink_broken=None,
+        )
+        self.exit(cancel_info)
 
     async def action_show_sort_dialog(self) -> None:
         """Show the sort options dialog."""
