@@ -15,6 +15,7 @@
 # - Changed return type to FileInfo dataclass with comprehensive file information
 # - Added backward compatibility mode that returns string when only file selection is enabled
 # - Updated FileInfo handling to check for error_message field (issue #10)
+# - Added context manager for signal handler restoration
 #
 
 """
@@ -23,12 +24,34 @@ selectfilecli - A handy file selection browser for CLI applications.
 This module provides a simple API to display a file browser TUI and get the selected file path.
 """
 
-from typing import Any, Optional, Union, overload
+from typing import Any, Optional, Union, overload, Generator
 import os
 import signal
 import sys
 import warnings
+from contextlib import contextmanager
 from .file_info import FileInfo
+
+
+@contextmanager
+def _signal_handler_context() -> Generator[None, None, None]:
+    """Context manager for setting up and restoring signal handlers.
+
+    This ensures that signal handlers are properly restored even if an
+    exception occurs during execution.
+    """
+
+    def signal_handler(signum: int, frame: Any) -> None:
+        """Handle interrupt signals gracefully."""
+        sys.exit(0)
+
+    # Save original signal handler
+    original_sigint = signal.signal(signal.SIGINT, signal_handler)
+    try:
+        yield
+    finally:
+        # Always restore original signal handler
+        signal.signal(signal.SIGINT, original_sigint)
 
 
 @overload
@@ -88,20 +111,11 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
         # Auto-detect: use FileInfo if dirs are selectable or explicitly requested
         return_info = select_dirs
 
-    # Setup signal handlers for clean exit
-    def signal_handler(signum: int, frame: Any) -> None:
-        """Handle interrupt signals gracefully."""
-        sys.exit(0)
-
-    # Register signal handlers
-    original_sigint = signal.signal(signal.SIGINT, signal_handler)
-    try:
+    # Use context manager for signal handling
+    with _signal_handler_context():
         # Create and run the Textual app
         app = FileBrowserApp(start_path=start_path, select_files=select_files, select_dirs=select_dirs)
         result = app.run()
-    finally:
-        # Restore original signal handler
-        signal.signal(signal.SIGINT, original_sigint)
 
     if result is None:
         return None
