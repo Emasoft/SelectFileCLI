@@ -77,6 +77,7 @@
 # - Fixed column alignment to be fully left-aligned (size and date columns)
 # - Fixed emoji visual width calculation breaking column alignment
 # - Fixed potential infinite recursion in calculate_directory_size with circular symlinks
+# - Implemented proper LRU cache eviction using OrderedDict for venv and dir size caches
 #
 
 """Textual-based file browser application."""
@@ -90,6 +91,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional, Any, Tuple, Dict, Iterable
 from enum import Enum
+from collections import OrderedDict
 from .file_info import FileInfo
 
 from textual import on, work
@@ -329,8 +331,8 @@ class CustomDirectoryTree(DirectoryTree):
     def __init__(self, path: str, **kwargs: Any) -> None:
         super().__init__(path, **kwargs)
         self._original_path = path
-        self._venv_cache: Dict[str, bool] = {}  # Cache for venv detection
-        self._dir_size_cache: Dict[str, int] = {}  # Cache for directory sizes
+        self._venv_cache: OrderedDict[str, bool] = OrderedDict()  # LRU cache for venv detection
+        self._dir_size_cache: OrderedDict[str, int] = OrderedDict()  # LRU cache for directory sizes
         self._column_widths: Dict[str, int] = {}  # Cache for calculated column widths
 
     def format_file_size(self, size: int) -> str:
@@ -429,24 +431,28 @@ class CustomDirectoryTree(DirectoryTree):
             return f'"{escaped}"'
         return filename
 
-    def _manage_cache(self, cache: Dict[str, Any], key: str, max_size: int) -> None:
-        """Manage LRU cache eviction.
+    def _manage_cache(self, cache: OrderedDict[str, Any], key: str, max_size: int) -> None:
+        """Manage LRU cache eviction using OrderedDict.
 
         Args:
-            cache: The cache dictionary to manage
+            cache: The OrderedDict cache to manage
             key: The key being accessed/added
             max_size: Maximum cache size
         """
-        if len(cache) >= max_size and key not in cache:
-            # Evict oldest entry (first key)
-            oldest_key = next(iter(cache))
-            del cache[oldest_key]
+        # If key exists, move it to the end (most recently used)
+        if key in cache:
+            cache.move_to_end(key)
+        elif len(cache) >= max_size:
+            # Cache is full and key is new - evict least recently used (first item)
+            cache.popitem(last=False)  # Remove first (oldest) item
 
     def has_venv(self, dir_path: Path) -> bool:
         """Check if directory contains a Python virtual environment."""
         # Check cache first
         path_str = str(dir_path)
         if path_str in self._venv_cache:
+            # Update LRU order for cache hit
+            self._manage_cache(self._venv_cache, path_str, MAX_VENV_CACHE_SIZE)
             return self._venv_cache[path_str]
 
         result = False
@@ -514,6 +520,8 @@ class CustomDirectoryTree(DirectoryTree):
 
         # Check cache first
         if path_str in self._dir_size_cache:
+            # Update LRU order for cache hit
+            self._manage_cache(self._dir_size_cache, path_str, MAX_DIR_CACHE_SIZE)
             return self._dir_size_cache[path_str]
 
         total_size = 0
