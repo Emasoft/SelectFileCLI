@@ -76,6 +76,7 @@
 # - Fixed duplicate button handler implementations - button handlers now call action methods
 # - Fixed column alignment to be fully left-aligned (size and date columns)
 # - Fixed emoji visual width calculation breaking column alignment
+# - Fixed potential infinite recursion in calculate_directory_size with circular symlinks
 #
 
 """Textual-based file browser application."""
@@ -475,19 +476,38 @@ class CustomDirectoryTree(DirectoryTree):
         except Exception:
             return None
 
-    def calculate_directory_size(self, dir_path: Path, depth: int = 0, max_items: int = 1000) -> int:
-        """Calculate total size of directory recursively with caching and depth protection.
+    def calculate_directory_size(self, dir_path: Path, depth: int = 0, max_items: int = 1000, visited: Optional[set[str]] = None) -> int:
+        """Calculate total size of directory recursively with caching and circular reference protection.
 
         Args:
             dir_path: Directory to calculate size for
             depth: Current recursion depth (internal parameter)
             max_items: Maximum number of items to process (to prevent hanging)
+            visited: Set of already visited directory real paths (internal parameter)
 
         Returns:
             Total size in bytes, or 0 if cannot be calculated
         """
+        # Initialize visited set on first call
+        if visited is None:
+            visited = set()
+
         # Protect against infinite recursion
         if depth > MAX_DIRECTORY_DEPTH:
+            return 0
+
+        # Get the real path to handle symlinks correctly
+        try:
+            real_path = dir_path.resolve()
+            real_path_str = str(real_path)
+
+            # Check if we've already visited this directory (circular reference)
+            if real_path_str in visited:
+                return 0
+
+            visited.add(real_path_str)
+        except (OSError, RuntimeError):
+            # Can't resolve path, skip it
             return 0
 
         path_str = str(dir_path)
@@ -514,7 +534,7 @@ class CustomDirectoryTree(DirectoryTree):
                         total_size += stat_info.st_size
                     elif stat.S_ISDIR(stat_info.st_mode):
                         # Directory - recursively calculate its size with incremented depth
-                        total_size += self.calculate_directory_size(entry, depth + 1, max_items)
+                        total_size += self.calculate_directory_size(entry, depth + 1, max_items, visited)
                     # Skip symlinks, special files, etc.
                 except (PermissionError, OSError):
                     # Skip files/dirs we can't access
