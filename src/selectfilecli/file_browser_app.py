@@ -55,6 +55,10 @@
 # - Fixed issue #7: Added OK and Cancel buttons to sort dialog
 # - Fixed issue #7: Improved Enter key handling in sort dialog
 # - Fixed issue #7: Sort dialog now properly shows current settings when opened
+# - Fixed issue #8: Implemented proper column alignment for directory entries
+# - Added column width calculation and dynamic formatting based on terminal width
+# - Handles long filenames by truncating with ellipsis when necessary
+# - Adjusts column display based on available space (omits date in narrow terminals)
 #
 
 """Textual-based file browser application."""
@@ -94,6 +98,13 @@ MAX_DIRECTORY_DEPTH = 100  # Maximum recursion depth for directory traversal
 # UI Element Heights
 NAVIGATION_BAR_HEIGHT = 3
 PATH_DISPLAY_HEIGHT = 1
+# Column formatting constants
+FILENAME_MIN_WIDTH = 30
+SIZE_COLUMN_WIDTH = 12
+DATE_COLUMN_WIDTH = 26  # "📆YYYY-MM-DD 🕚HH:MM:SS"
+INDICATOR_COLUMN_WIDTH = 6
+COLUMN_SPACING = 2
+MAX_FILENAME_LINES = 3
 
 # Set up locale for number formatting
 try:
@@ -301,6 +312,7 @@ class CustomDirectoryTree(DirectoryTree):
         self._original_path = path
         self._venv_cache: Dict[str, bool] = {}  # Cache for venv detection
         self._dir_size_cache: Dict[str, int] = {}  # Cache for directory sizes
+        self._column_widths: Dict[str, int] = {}  # Cache for calculated column widths
 
     def format_file_size(self, size: int) -> str:
         """Format file size in human-readable format with locale support."""
@@ -553,6 +565,167 @@ class CustomDirectoryTree(DirectoryTree):
         except Exception:
             return Text("Current Directory", style="bright_blue bold")
 
+    def _calculate_column_widths(self, node: Any) -> None:
+        """Calculate optimal column widths based on visible content."""
+        if not hasattr(node, "_children") or not node._children:
+            return
+
+        # Initialize widths
+        max_filename_width = FILENAME_MIN_WIDTH
+        max_size_width = SIZE_COLUMN_WIDTH
+
+        # Analyze all visible children
+        for child in node._children:
+            if not child.data:
+                continue
+
+            path = self._get_path_from_node_data(child.data)
+            if not path or str(path) == "<...loading...>":
+                continue
+
+            try:
+                # Get filename length
+                filename = self.format_filename_with_quotes(path.name)
+                file_stat = path.lstat()
+                color_style, suffix = self.get_file_color_and_suffix(path, file_stat)
+                full_filename = filename + suffix
+
+                # Update max filename width (but cap it)
+                max_filename_width = min(max(max_filename_width, len(full_filename)), 80)
+
+                # Update size width
+                if path.is_file():
+                    size_str = self.format_file_size(file_stat.st_size)
+                    max_size_width = max(max_size_width, len(size_str))
+            except (OSError, AttributeError):
+                continue
+
+        # Store calculated widths
+        self._column_widths = {"filename": max_filename_width, "size": max_size_width, "date": DATE_COLUMN_WIDTH, "indicators": INDICATOR_COLUMN_WIDTH}
+
+    def _wrap_text(self, text: str, width: int, max_lines: int = MAX_FILENAME_LINES) -> list[str]:
+        """Wrap text to fit within specified width, limited to max_lines."""
+        if len(text) <= width:
+            return [text]
+
+        lines = []
+        current_line = ""
+
+        # Simple word wrapping
+        words = text.split()
+        for word in words:
+            if not current_line:
+                current_line = word
+            elif len(current_line) + 1 + len(word) <= width:
+                current_line += " " + word
+            else:
+                lines.append(current_line)
+                current_line = word
+                if len(lines) >= max_lines - 1:
+                    # Last line - add ellipsis if needed
+                    remaining = " ".join(words[words.index(word) :])
+                    if len(remaining) > width:
+                        current_line = remaining[: width - 3] + "..."
+                    else:
+                        current_line = remaining
+                    break
+
+        if current_line:
+            lines.append(current_line)
+
+        # If still no lines or text doesn't contain spaces, force break
+        if not lines:
+            for i in range(0, len(text), width):
+                if len(lines) >= max_lines - 1 and i + width < len(text):
+                    lines.append(text[i : i + width - 3] + "...")
+                    break
+                else:
+                    lines.append(text[i : i + width])
+
+        return lines[:max_lines]
+
+    def _format_with_columns(self, filename: str, size: str, date: str, indicators: str, filename_style: str, size_style: str, date_style: str, indicators_style: str, node: Any = None) -> Text:
+        """Format entry with proper column alignment."""
+        # Get current terminal width from app
+        try:
+            app = self.app
+            if app and hasattr(app, "size"):
+                terminal_width = app.size.width
+            else:
+                terminal_width = 80  # Default fallback
+        except Exception:
+            terminal_width = 80
+
+        # Calculate available space for columns
+        # Account for tree indentation levels (each level adds ~2 chars)
+        tree_level = 0
+        if node:
+            temp_node = node
+            while temp_node and temp_node.parent:
+                tree_level += 1
+                temp_node = temp_node.parent
+
+        tree_padding = 4 + (tree_level * 2)  # Base padding + indentation
+        border_padding = 6  # Border, scroll bars, margins
+        available_width = max(40, terminal_width - tree_padding - border_padding)
+
+        # Determine if we should show date column based on available width
+        show_date = available_width > 60  # Only show date if we have enough space
+
+        # Calculate column widths dynamically
+        if show_date:
+            size_width = SIZE_COLUMN_WIDTH
+            date_width = DATE_COLUMN_WIDTH
+            indicator_width = 4 if indicators else 0
+
+            # Calculate fixed width including all columns
+            fixed_width = size_width + COLUMN_SPACING
+            if show_date:
+                fixed_width += date_width + COLUMN_SPACING
+            if indicators:
+                fixed_width += indicator_width + COLUMN_SPACING
+
+            # Filename gets remaining space
+            filename_width = max(15, available_width - fixed_width)
+        else:
+            # For narrow terminals, only show filename and size
+            size_width = SIZE_COLUMN_WIDTH
+            indicator_width = 4 if indicators else 0
+            fixed_width = size_width + COLUMN_SPACING
+            if indicators:
+                fixed_width += indicator_width + COLUMN_SPACING
+            filename_width = max(15, available_width - fixed_width)
+
+        # Create formatted text
+        formatted = Text()
+
+        # Handle long filenames
+        if len(filename) > filename_width:
+            # For very long filenames, truncate with ellipsis
+            truncated = filename[: filename_width - 3] + "..."
+            formatted.append(truncated.ljust(filename_width), style=filename_style)
+        else:
+            # Normal filename
+            formatted.append(filename.ljust(filename_width), style=filename_style)
+
+        # Add spacing
+        formatted.append(" " * COLUMN_SPACING)
+
+        # Add size column
+        formatted.append(size.ljust(size_width), style=size_style)
+
+        # Add date column only if space permits
+        if show_date:
+            formatted.append(" " * COLUMN_SPACING)
+            formatted.append(date, style=date_style)
+
+        # Add indicators if present
+        if indicators:
+            formatted.append(" " * COLUMN_SPACING)
+            formatted.append(indicators, style=indicators_style)
+
+        return formatted
+
     def render_label(self, node: Any, base_style: Any, style: Any) -> Text:
         """Render node label with additional file information."""
         # Special handling for <empty> placeholder
@@ -590,37 +763,28 @@ class CustomDirectoryTree(DirectoryTree):
             # Get color and suffix based on file type
             color_style, suffix = self.get_file_color_and_suffix(file_path, file_stat)
 
-            # Create new label with file info
-            new_label = Text()
-
             # Format filename with quotes if needed
             filename = self.format_filename_with_quotes(file_path.name)
 
-            # Add filename with color and suffix
-            new_label.append(filename, style=color_style)
-            if suffix:
-                new_label.append(suffix, style=color_style)
-
-            # Add venv indicator for directories
-            if is_dir and self.has_venv(file_path):
-                new_label.append(" ✨", style="bright_yellow")
-
-            # Add lock icon for read-only files
-            if not os.access(file_path, os.W_OK):
-                new_label.append(" 🔒", style="bright_red")
-
-            # Add file size
+            # Calculate column data
             if is_dir:
-                new_label.append("  <DIR>", style="dim cyan")
+                size_str = "<DIR>"
             else:
                 size_str = self.format_file_size(file_stat.st_size)
-                new_label.append(f"  {size_str}", style="dim cyan")
 
-            # Add modification date
             date_str = self.format_date(file_stat.st_mtime)
-            new_label.append(f"  {date_str}", style="dim yellow")
 
-            return new_label
+            # Add special indicators
+            indicators = ""
+            if is_dir and self.has_venv(file_path):
+                indicators += "✨"
+            if not os.access(file_path, os.W_OK):
+                indicators += "🔒"
+
+            # Format with columns - pass the node for context
+            formatted_text = self._format_with_columns(filename=filename + suffix, size=size_str, date=date_str, indicators=indicators, filename_style=color_style, size_style="dim cyan", date_style="dim yellow", indicators_style="bright_yellow" if "✨" in indicators else "bright_red", node=node)
+
+            return formatted_text
 
         except Exception:
             # If anything goes wrong, return a simple label
@@ -670,6 +834,9 @@ class CustomDirectoryTree(DirectoryTree):
         # Update children order
         node._children = [info[0] for info in children_info]
 
+        # Calculate column widths for proper alignment
+        self._calculate_column_widths(node)
+
     def on_mount(self) -> None:
         """Called when widget is mounted."""
         super().on_mount()  # type: ignore[no-untyped-call]
@@ -703,6 +870,11 @@ class CustomDirectoryTree(DirectoryTree):
                     sort_node(child)
 
         sort_node(self.root)
+
+        # Recalculate column widths for root level
+        if self.root and self.root.is_expanded:
+            self._calculate_column_widths(self.root)
+
         self.refresh()
 
     def on_directory_tree_directory_selected(self, event: Any) -> None:
@@ -765,6 +937,10 @@ class CustomDirectoryTree(DirectoryTree):
                 )
 
         node.expand()
+
+        # Calculate column widths after populating
+        if content_list:
+            self._calculate_column_widths(node)
 
     def _add_loading_placeholder(self, node: TreeNode[DirEntry]) -> TreeNode[DirEntry]:
         """Add a loading placeholder to a node.
