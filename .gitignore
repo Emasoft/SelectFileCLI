@@ -92,3 +92,4 @@ test.py
 CLAUDE.md
 snapshot_report.html
 .pre-commit-logs/
+example_error_handling.py

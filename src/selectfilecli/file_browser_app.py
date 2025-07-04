@@ -60,6 +60,9 @@
 # - Handles long filenames by truncating with ellipsis when necessary
 # - Adjusts column display based on available space (omits date in narrow terminals)
 # - Fixed issue #10: Added error_message to FileInfo to handle file access errors
+# - Fixed issue #11: Implemented real-time terminal resize handling
+# - Added on_resize event handlers to recalculate column widths on terminal resize
+# - Clear column width cache on resize to force recalculation
 #
 
 """Textual-based file browser application."""
@@ -878,6 +881,24 @@ class CustomDirectoryTree(DirectoryTree):
 
         self.refresh()
 
+    def on_resize(self, event: Any) -> None:
+        """Handle terminal resize events by recalculating column widths."""
+        # Clear column width cache to force recalculation
+        self._column_widths.clear()
+
+        # Recalculate widths for all expanded nodes
+        def recalc_node(node: Any) -> None:
+            if node.is_expanded and hasattr(node, "_children") and node._children:
+                self._calculate_column_widths(node)
+                for child in node.children:
+                    recalc_node(child)
+
+        if self.root:
+            recalc_node(self.root)
+
+        # Force a full refresh to redraw with new column widths
+        self.refresh()
+
     def on_directory_tree_directory_selected(self, event: Any) -> None:
         """Handle directory selection - either select it or expand/collapse."""
         # This is handled by the app's on_directory_selected method now
@@ -1376,3 +1397,9 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
         # Force the tree to start loading
         new_tree.reload()
+
+    def on_resize(self, event: Any) -> None:
+        """Handle terminal resize events."""
+        # Pass resize event to the directory tree
+        tree = self.query_one("#directory-tree", CustomDirectoryTree)
+        tree.on_resize(event)
