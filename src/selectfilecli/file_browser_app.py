@@ -678,7 +678,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
     #path-display {
         background: $surface;
-        color: $text-muted;
+        color: yellow;
         padding: 0 1;
         height: 1;
         width: 100%;
