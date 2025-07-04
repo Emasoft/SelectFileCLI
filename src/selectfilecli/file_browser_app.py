@@ -46,6 +46,12 @@
 # - Fixed Enter key not working in sort dialog
 # - Fixed UI layout: added padding-top to main container to prevent header subtitle overlap
 # - Fixed issue #4: Display <empty> placeholder when opening empty directories
+# - Fixed issues #5 and #6: Implemented async loading with loading placeholders
+# - Added <...loading...> placeholder with blinking effect during directory loading
+# - Fixed UI responsiveness by showing placeholders immediately on expand/navigate
+# - Added proper handling of loading states in render_label
+# - Skip placeholders from sorting to avoid errors
+# - Show root node immediately with loading placeholder during navigation
 #
 
 """Textual-based file browser application."""
@@ -66,11 +72,11 @@ from textual.app import App, ComposeResult
 from textual.reactive import reactive
 from textual.widgets import Header, Footer, Label, RadioButton, RadioSet, Button
 from textual.widgets._directory_tree import DirectoryTree, DirEntry
-from textual.widgets._tree import TreeNode
+from textual.widgets._tree import TreeNode, Tree
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.worker import get_current_worker, WorkerCancelled, WorkerFailed
+from textual.worker import get_current_worker, WorkerCancelled, WorkerFailed, Worker
 from rich.text import Text
 
 # Constants
@@ -496,6 +502,10 @@ class CustomDirectoryTree(DirectoryTree):
 
     def render_label(self, node: Any, base_style: Any, style: Any) -> Text:
         """Render node label with additional file information."""
+        # Special handling for <empty> placeholder
+        if not node.data and hasattr(node, "label") and str(node.label) == "<empty>":
+            return Text("<empty>", style="dim italic")
+
         # Skip if no data
         if not node.data:
             return Text("Unknown")
@@ -509,6 +519,12 @@ class CustomDirectoryTree(DirectoryTree):
             file_path = self._get_path_from_node_data(node.data)
             if not file_path:
                 return Text("Unknown", style="dim red")
+
+            # Special handling for loading placeholder
+            if str(file_path) == "<...loading...>":
+                # Create blinking loading text
+                loading_text = Text("<...loading...>", style="bright_yellow blink")
+                return loading_text
 
             # Get file stats
             try:
@@ -566,9 +582,13 @@ class CustomDirectoryTree(DirectoryTree):
         children_info = []
         for child in node._children:
             try:
+                # Skip placeholders from sorting
+                if not child.data or (hasattr(child, "label") and str(child.label) in ["<empty>", "<...loading...>"]):
+                    continue
+
                 # Get path from child data
                 path = self._get_path_from_node_data(child.data)
-                if not path:
+                if not path or str(path) == "<...loading...>":
                     continue
                 stat = path.lstat()  # Use lstat for consistency
 
@@ -637,6 +657,24 @@ class CustomDirectoryTree(DirectoryTree):
         # This is handled by the app's on_directory_selected method now
         pass
 
+    @on(Tree.NodeExpanded)
+    def on_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
+        """Handle when a tree node is expanded to show loading placeholder.
+
+        This method intercepts the node expansion to show loading state.
+        """
+        node = event.node
+        if node and node.data:
+            # Check if this is a valid path that needs loading
+            path = self._get_path_from_node_data(node.data)
+            if path and path.is_dir() and not node.children:
+                # Show loading placeholder immediately before the actual loading starts
+                self._add_loading_placeholder(node)
+                # Force a refresh to show the placeholder
+                self.refresh()
+
+        # Don't call super() as this is an event handler, not an override
+
     def on_key(self, event: Any) -> None:
         """Handle key events in the directory tree."""
         if event.key == "enter" and self.cursor_node:
@@ -674,6 +712,21 @@ class CustomDirectoryTree(DirectoryTree):
                 )
 
         node.expand()
+
+    def _add_loading_placeholder(self, node: TreeNode[DirEntry]) -> TreeNode[DirEntry]:
+        """Add a loading placeholder to a node.
+
+        Args:
+            node: The node to add the placeholder to.
+
+        Returns:
+            The loading placeholder node.
+        """
+        # Remove existing children first
+        node.remove_children()
+        # Add loading placeholder with special data
+        loading_node = node.add_leaf("", data=DirEntry(Path("<...loading...>")))
+        return loading_node
 
     @work(exclusive=True)
     async def _loader(self) -> None:
@@ -1062,8 +1115,16 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         await old_tree.remove()
         await container.mount(new_tree)
 
+        # Show loading placeholder in root immediately
+        if new_tree.root:
+            new_tree._add_loading_placeholder(new_tree.root)
+            new_tree.refresh()
+
         # Focus the new tree after mounting
         new_tree.focus()
 
         # Update path display
         self._update_path_display(str(self.current_path))
+
+        # Force the tree to start loading
+        new_tree.reload()
