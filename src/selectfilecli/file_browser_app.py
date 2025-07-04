@@ -63,6 +63,11 @@
 # - Fixed issue #11: Implemented real-time terminal resize handling
 # - Added on_resize event handlers to recalculate column widths on terminal resize
 # - Clear column width cache on resize to force recalculation
+# - Fixed async navigation freezes by using proper Textual worker pattern
+# - Removed incorrect async/await usage that was blocking the UI
+# - Implemented navigation history with back/forward buttons
+# - Fixed column alignment to be left-aligned with dynamic width calculation
+# - Calculate column width based on longest filename + 1 character padding
 #
 
 """Textual-based file browser application."""
@@ -1303,16 +1308,16 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         """Navigate to parent directory."""
         parent = self.current_path.parent
         if parent != self.current_path:  # Check we're not already at root
-            self.call_after_refresh(self._change_directory, parent)
+            self._change_directory(parent)
 
     def action_go_home(self) -> None:
         """Navigate to home directory."""
         home = Path.home()
-        self.call_after_refresh(self._change_directory, home)
+        self._change_directory(home)
 
     def action_go_root(self) -> None:
         """Navigate to root directory."""
-        self.call_after_refresh(self.on_root_button)
+        self.on_root_button()
 
     def action_select_current_directory(self) -> None:
         """Select the current highlighted directory."""
@@ -1338,7 +1343,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
         if path.is_dir():
             # Navigate into the directory
-            self.call_after_refresh(self._change_directory, path)
+            self._change_directory(path)
         elif path.is_file() and self.select_files:
             # Select the file
             self._create_file_info(path, is_file=True)
@@ -1354,7 +1359,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         self.action_go_home()
 
     @on(Button.Pressed, "#root-button")
-    async def on_root_button(self) -> None:
+    def on_root_button(self) -> None:
         """Handle root button click."""
         # Get system root(s)
         if platform.system() == "Windows":
@@ -1362,40 +1367,40 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             try:
                 current_drive = Path.cwd().drive
                 if current_drive:
-                    await self._change_directory(Path(current_drive + "\\"))
+                    self._change_directory(Path(current_drive + "\\"))
                 else:
                     # Fallback to C: drive
                     c_drive = Path("C:\\")
                     if c_drive.exists():
-                        await self._change_directory(c_drive)
+                        self._change_directory(c_drive)
             except Exception:
                 # Last resort: try common drives
                 for drive_letter in ["C", "D", "E"]:
                     drive_path = Path(f"{drive_letter}:\\")
                     try:
                         if drive_path.exists():
-                            await self._change_directory(drive_path)
+                            self._change_directory(drive_path)
                             break
                     except (OSError, PermissionError):
                         continue
         else:  # Unix-like
-            await self._change_directory(Path("/"))
+            self._change_directory(Path("/"))
 
     @on(Button.Pressed, "#back-button")
     def on_back_button(self) -> None:
         """Handle back button click - navigate to previous directory in history."""
         if self.history_position > 0:
             self.history_position -= 1
-            self.call_after_refresh(self._change_directory, self.navigation_history[self.history_position], add_to_history=False)
+            self._change_directory(self.navigation_history[self.history_position], add_to_history=False)
 
     @on(Button.Pressed, "#forward-button")
     def on_forward_button(self) -> None:
         """Handle forward button click - navigate to next directory in history."""
         if self.history_position < len(self.navigation_history) - 1:
             self.history_position += 1
-            self.call_after_refresh(self._change_directory, self.navigation_history[self.history_position], add_to_history=False)
+            self._change_directory(self.navigation_history[self.history_position], add_to_history=False)
 
-    async def _change_directory(self, new_path: Path, add_to_history: bool = True) -> None:
+    def _change_directory(self, new_path: Path, add_to_history: bool = True) -> None:
         """Change the current directory and refresh the tree."""
         if not new_path.exists() or not new_path.is_dir():
             return
@@ -1424,6 +1429,15 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         # Update button states
         self._update_navigation_buttons()
 
+        # Update path display immediately
+        self._update_path_display(str(self.current_path))
+
+        # Use a worker to handle the tree replacement
+        self._replace_tree_worker()
+
+    @work(exclusive=True)
+    async def _replace_tree_worker(self) -> None:
+        """Worker to replace the directory tree without blocking the UI."""
         # Get the container
         container = self.query_one("#tree-container")
         old_tree = container.query_one(CustomDirectoryTree)
@@ -1435,17 +1449,12 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         new_tree.allow_file_select = self.select_files
         new_tree.allow_dir_select = self.select_dirs
 
-        # Update path display immediately
-        self._update_path_display(str(self.current_path))
-
         # Remove old tree and mount new one
         await old_tree.remove()
         await container.mount(new_tree)
 
         # Focus the new tree after mounting
         new_tree.focus()
-
-        # The tree will automatically start loading its content
 
     def on_resize(self, event: Any) -> None:
         """Handle terminal resize events."""
