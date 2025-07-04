@@ -78,6 +78,7 @@
 # - Fixed emoji visual width calculation breaking column alignment
 # - Fixed potential infinite recursion in calculate_directory_size with circular symlinks
 # - Implemented proper LRU cache eviction using OrderedDict for venv and dir size caches
+# - Fixed race condition in navigation by tracking navigation state and passing target path to worker
 #
 
 """Textual-based file browser application."""
@@ -1139,6 +1140,9 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         self.history_position: int = 0
         self.max_history_size: int = 50
 
+        # Navigation state tracking
+        self._is_navigating: bool = False
+
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
         yield Header()
@@ -1429,6 +1433,11 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         if new_path == self.current_path:
             return
 
+        # Prevent concurrent navigation
+        if self._is_navigating:
+            return
+        self._is_navigating = True
+
         self.current_path = new_path
 
         # Manage navigation history
@@ -1457,11 +1466,16 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         container.loading = True
 
         # Use a worker to handle the tree replacement
-        self._replace_tree_worker()
+        # Pass the target path to avoid race conditions
+        self._replace_tree_worker(new_path)
 
     @work(exclusive=True)
-    async def _replace_tree_worker(self) -> None:
-        """Worker to replace the directory tree without blocking the UI."""
+    async def _replace_tree_worker(self, target_path: Path) -> None:
+        """Worker to replace the directory tree without blocking the UI.
+
+        Args:
+            target_path: The path to navigate to
+        """
         try:
             # Get the container
             container = self.query_one("#tree-container")
@@ -1474,8 +1488,8 @@ class FileBrowserApp(App[Optional[FileInfo]]):
                 # Old tree might not exist yet
                 pass
 
-            # Create new tree with updated path
-            new_tree = CustomDirectoryTree(str(self.current_path), id="directory-tree")
+            # Create new tree with the target path (not self.current_path to avoid race conditions)
+            new_tree = CustomDirectoryTree(str(target_path), id="directory-tree")
             new_tree.tree_sort_mode = self.current_sort_mode
             new_tree.tree_sort_order = self.current_sort_order
             new_tree.allow_file_select = self.select_files
@@ -1487,9 +1501,10 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             # Focus the new tree after mounting
             new_tree.focus()
         finally:
-            # Always hide the loading indicator when done
+            # Always hide the loading indicator and reset navigation flag when done
             container = self.query_one("#tree-container")
             container.loading = False
+            self._is_navigating = False
 
     def on_resize(self, event: Any) -> None:
         """Handle terminal resize events."""
