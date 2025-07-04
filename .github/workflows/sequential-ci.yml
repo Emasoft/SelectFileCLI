@@ -1,0 +1,89 @@
+name: Sequential CI Pipeline
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+# Prevent ANY parallel execution
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false # NEVER cancel - wait instead
+
+env:
+  # Force sequential execution everywhere
+  PYTEST_MAX_WORKERS: 1
+  PRE_COMMIT_MAX_WORKERS: 1
+  PYTHONDONTWRITEBYTECODE: 1
+  UV_NO_CACHE: 1
+
+  # Resource limits
+  MEMORY_LIMIT_MB: 4096
+  MAX_PROCESSES: 50
+
+  # Timeouts
+  TIMEOUT_SECONDS: 600
+  TRUFFLEHOG_TIMEOUT: 300
+
+jobs:
+  sequential-pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60 # Global timeout
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v6
+      with:
+        enable-cache: true
+
+    - name: Create virtual environment
+      run: uv venv
+
+    - name: Install dependencies
+      run: |
+        source .venv/bin/activate
+        uv sync --all-extras
+        uv pip install pre-commit
+
+    - name: Set resource limits
+      run: |
+        # Set reasonable process limit
+        ulimit -u 500 2>/dev/null || echo "Process limit not supported"
+
+        # Set file limit
+        ulimit -n 2048 2>/dev/null || echo "File limit not supported"
+
+        # Show current limits
+        echo "=== Current Resource Limits ==="
+        ulimit -a
+
+    - name: Run pre-commit checks
+      run: |
+        source .venv/bin/activate
+        pre-commit run --all-files --show-diff-on-failure
+
+    - name: Run tests sequentially
+      run: |
+        source .venv/bin/activate
+        uv run pytest tests -v --tb=short
+
+    - name: Build project
+      run: |
+        source .venv/bin/activate
+        uv build
+
+    - name: Memory usage report
+      if: always()
+      run: |-
+        echo "=== System Resources ==="
+        free -h
+        ps aux --sort=-%mem | head -10

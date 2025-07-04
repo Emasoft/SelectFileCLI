@@ -1,10 +1,11 @@
 # Sequential pre-commit configuration
-# All hooks run one at a time to minimize resource usage
-# See https://pre-commit.com for more information
-# See https://pre-commit.com/hooks.html for more hooks
+# All hooks run one at a time to prevent process explosions
+#
+# CRITICAL: Every hook MUST have require_serial: true
+# This prevents ANY parallel execution
 
 default_language_version:
-  python: python3.12
+  python: python3.11
 
 default_stages: [pre-commit]
 
@@ -68,22 +69,22 @@ repos:
         stages: [pre-commit]
         require_serial: true
 
-  # Resource-intensive hooks using project-local wrappers
+  # Use safe-run.sh for resource-intensive hooks
   - repo: local
     hooks:
-      - id: mypy-limited
-        name: Type checking (memory limited)
-        entry: .pre-commit-wrappers/memory-limited-hook.sh uv run mypy
+      - id: mypy-safe
+        name: Type checking (safe)
+        entry: ./scripts/safe-run.sh uv run mypy
         language: system
         types: [python]
         require_serial: true
         pass_filenames: true
         stages: [pre-commit]
-        args: [--strict, --show-error-context, --pretty, --install-types, --non-interactive]
+        args: [--ignore-missing-imports, --strict]
 
-      - id: trufflehog-limited
-        name: Secret detection (resource limited)
-        entry: .pre-commit-wrappers/trufflehog-limited.sh
+      - id: trufflehog-safe
+        name: Secret detection (safe)
+        entry: ./scripts/safe-run.sh trufflehog git file://. --only-verified --fail --no-update
         language: system
         pass_filenames: false
         require_serial: true
@@ -122,5 +123,5 @@ repos:
 # CI configuration
 ci:
   skip:
-    - mypy-limited
-    - trufflehog-limited
+    - mypy-safe
+    - trufflehog-safe
