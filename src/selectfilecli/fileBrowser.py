@@ -15,6 +15,7 @@
 # - Renamed fileList to file_list following Python naming conventions
 # - Added docstrings to all functions
 # - Added type hints to function parameters
+# - Added terminal detection before termios operations to prevent crashes in non-TTY environments
 #
 
 import os
@@ -38,8 +39,12 @@ def get_input() -> str:
         The character read from stdin
 
     Raises:
-        OSError: If terminal attributes cannot be read/set
+        OSError: If terminal attributes cannot be read/set or stdin is not a terminal
     """
+    # Check if stdin is actually a terminal
+    if not sys.stdin.isatty():
+        raise OSError("Standard input is not a terminal")
+
     try:
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
@@ -50,7 +55,7 @@ def get_input() -> str:
             termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
         return ch
     except (OSError, ValueError) as e:
-        # Handle case where stdin is not a terminal
+        # Handle case where terminal operations fail
         raise OSError(f"Failed to read terminal input: {e}")
 
 
@@ -61,7 +66,14 @@ def display_files(current_path: str, file_list: List[Union[Dict[str, str], os.Di
         current_path: The current directory path
         file_list: List of file entries to display
         selected_index: Index of the currently selected item
+
+    Raises:
+        OSError: If stdout is not a terminal
     """
+    # Check if stdout is actually a terminal
+    if not sys.stdout.isatty():
+        raise OSError("Standard output is not a terminal")
+
     try:
         sys.stdout.write(CLEAR_SCREEN + RESET_CURSOR)
         print(f"Current Path: {current_path}")
@@ -86,8 +98,12 @@ def tui_file_browser() -> Optional[str]:
         The path of the selected file, or None if cancelled
 
     Raises:
-        OSError: If terminal operations fail
+        OSError: If terminal operations fail or stdin/stdout are not terminals
     """
+    # Check if both stdin and stdout are terminals
+    if not sys.stdin.isatty() or not sys.stdout.isatty():
+        raise OSError("This application requires an interactive terminal")
+
     current_path = os.getcwd()
     selected_index = 0
 
