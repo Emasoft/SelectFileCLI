@@ -88,6 +88,7 @@ from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.worker import get_current_worker, WorkerCancelled, WorkerFailed, Worker
+from textual.message import Message
 from rich.text import Text
 
 # Constants
@@ -904,23 +905,16 @@ class CustomDirectoryTree(DirectoryTree):
         # This is handled by the app's on_directory_selected method now
         pass
 
-    @on(Tree.NodeExpanded)
-    def on_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
-        """Handle when a tree node is expanded to show loading placeholder.
+    def on_tree_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
+        """Handle when a tree node is expanded.
 
-        This method intercepts the node expansion to show loading state.
+        DirectoryTree handles async loading automatically, but we add visual feedback.
         """
         node = event.node
-        if node and node.data:
-            # Check if this is a valid path that needs loading
-            path = self._get_path_from_node_data(node.data)
-            if path and path.is_dir() and not node.children:
-                # Show loading placeholder immediately before the actual loading starts
-                self._add_loading_placeholder(node)
-                # Force a refresh to show the placeholder
-                self.refresh()
-
-        # Don't call super() as this is an event handler, not an override
+        if node and node.data and not node.children:
+            # DirectoryTree will populate this automatically
+            # We just ensure proper sorting after population
+            pass
 
     def on_key(self, event: Any) -> None:
         """Handle key events in the directory tree."""
@@ -932,6 +926,37 @@ class CustomDirectoryTree(DirectoryTree):
                 # For now, let the default behavior handle it
                 pass
 
+    def _add_loading_placeholder(self, node: TreeNode[DirEntry]) -> TreeNode[DirEntry]:
+        """Add a loading placeholder to a node.
+
+        Args:
+            node: The node to add the placeholder to.
+
+        Returns:
+            The loading placeholder node.
+        """
+        # Remove existing children first
+        node.remove_children()
+        # Add loading placeholder with special data
+        loading_node = node.add_leaf("", data=DirEntry(Path("<...loading...>")))
+        return loading_node
+
+    async def _on_tree_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
+        """Called when a node is expanded, before loading starts.
+
+        This is called by Tree when a node is expanded.
+        """
+        node = event.node
+        if node.data and not node.children:
+            # Show loading placeholder
+            path = self._get_path_from_node_data(node.data)
+            if path and path.is_dir():
+                self._add_loading_placeholder(node)
+                self.refresh()
+
+        # Call parent implementation to trigger loading
+        await super()._on_tree_node_expanded(event)
+
     def _populate_node(self, node: TreeNode[DirEntry], content: Iterable[Path]) -> None:
         """Populate the given tree node with the given directory content.
 
@@ -941,6 +966,7 @@ class CustomDirectoryTree(DirectoryTree):
             node: The Tree node to populate.
             content: The collection of `Path` objects to populate the node with.
         """
+        # First, remove any loading placeholder
         node.remove_children()
 
         # Convert to list to check if empty
@@ -958,26 +984,13 @@ class CustomDirectoryTree(DirectoryTree):
                     allow_expand=self._safe_is_dir(path),
                 )
 
-        node.expand()
-
         # Calculate column widths after populating
         if content_list:
             self._calculate_column_widths(node)
 
-    def _add_loading_placeholder(self, node: TreeNode[DirEntry]) -> TreeNode[DirEntry]:
-        """Add a loading placeholder to a node.
-
-        Args:
-            node: The node to add the placeholder to.
-
-        Returns:
-            The loading placeholder node.
-        """
-        # Remove existing children first
-        node.remove_children()
-        # Add loading placeholder with special data
-        loading_node = node.add_leaf("", data=DirEntry(Path("<...loading...>")))
-        return loading_node
+        # Ensure the node is expanded to show content
+        if not node.is_expanded:
+            node.expand()
 
     @work(exclusive=True)
     async def _loader(self) -> None:
@@ -1106,7 +1119,12 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
         # Validate start path
         try:
-            path = Path(start_path).resolve()
+            # If start_path is empty or None, use current working directory
+            if not start_path:
+                path = Path.cwd()
+            else:
+                path = Path(start_path).expanduser().resolve()
+
             if not path.exists():
                 path = Path.cwd()
             elif not path.is_dir():
@@ -1318,7 +1336,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             return
 
         if path.is_dir():
-            # Navigate into the directory
+            # Navigate into the directory - use post_message to avoid blocking
             await self._change_directory(path)
         elif path.is_file() and self.select_files:
             # Select the file
@@ -1373,30 +1391,24 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         container = self.query_one("#tree-container")
         old_tree = container.query_one(CustomDirectoryTree)
 
-        # Create new tree with updated path BEFORE removing old one
+        # Create new tree with updated path
         new_tree = CustomDirectoryTree(str(self.current_path), id="directory-tree")
         new_tree.tree_sort_mode = self.current_sort_mode
         new_tree.tree_sort_order = self.current_sort_order
         new_tree.allow_file_select = self.select_files
         new_tree.allow_dir_select = self.select_dirs
 
+        # Update path display immediately
+        self._update_path_display(str(self.current_path))
+
         # Remove old tree and mount new one
         await old_tree.remove()
         await container.mount(new_tree)
 
-        # Show loading placeholder in root immediately
-        if new_tree.root:
-            new_tree._add_loading_placeholder(new_tree.root)
-            new_tree.refresh()
-
         # Focus the new tree after mounting
         new_tree.focus()
 
-        # Update path display
-        self._update_path_display(str(self.current_path))
-
-        # Force the tree to start loading
-        new_tree.reload()
+        # The tree will automatically start loading its content
 
     def on_resize(self, event: Any) -> None:
         """Handle terminal resize events."""
