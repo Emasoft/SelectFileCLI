@@ -31,6 +31,7 @@
 # - Added tests for navigation with symlinks
 # - Added tests for rapid navigation stability
 # - Added tests for focus preservation after navigation
+# - Added test for empty directory display showing <empty> placeholder
 #
 
 """Tests for the Textual file browser application."""
@@ -1735,6 +1736,69 @@ class TestNewFeatures:
             finally:
                 # Restore permissions for cleanup
                 restricted.chmod(0o755)
+
+    @pytest.mark.asyncio
+    async def test_empty_directory_display(self) -> None:
+        """Test that empty directories display '<empty>' placeholder."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create an empty directory
+            empty_dir = test_dir / "empty_folder"
+            empty_dir.mkdir()
+
+            # Create a non-empty directory for comparison
+            non_empty_dir = test_dir / "non_empty_folder"
+            non_empty_dir.mkdir()
+            (non_empty_dir / "file.txt").write_text("test content")
+
+            app = FileBrowserApp(str(test_dir))
+            async with app.run_test() as pilot:
+                tree = pilot.app.query_one(CustomDirectoryTree)
+
+                # Expand the root to see the directories
+                root_node = tree.root
+                root_node.expand()
+                await pilot.pause()
+
+                # Find and expand the empty directory
+                empty_node = None
+                for child in root_node.children:
+                    # The label might include formatting, so check if it contains the folder name
+                    if "empty_folder" in child.label.plain:
+                        empty_node = child
+                        break
+
+                assert empty_node is not None, "Empty folder node not found"
+
+                # Expand the empty directory
+                empty_node.expand()
+                await pilot.pause()
+
+                # Check that it shows the <empty> placeholder
+                assert len(empty_node.children) == 1
+                placeholder_node = empty_node.children[0]
+                assert placeholder_node.label.plain == "<empty>"
+                assert placeholder_node.data is None
+                assert not placeholder_node.allow_expand
+
+                # Check that the non-empty directory shows actual content
+                non_empty_node = None
+                for child in root_node.children:
+                    if "non_empty_folder" in child.label.plain:
+                        non_empty_node = child
+                        break
+
+                assert non_empty_node is not None, "Non-empty folder node not found"
+
+                non_empty_node.expand()
+                await pilot.pause()
+
+                # Should show the file, not the placeholder
+                assert len(non_empty_node.children) == 1
+                file_node = non_empty_node.children[0]
+                assert "file.txt" in file_node.label.plain
+                assert file_node.data is not None
 
 
 class TestNavigationFeatures:

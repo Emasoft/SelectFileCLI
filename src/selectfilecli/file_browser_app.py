@@ -45,6 +45,7 @@
 # - Added Enter key binding to navigate into directories
 # - Fixed Enter key not working in sort dialog
 # - Fixed UI layout: added padding-top to main container to prevent header subtitle overlap
+# - Fixed issue #4: Display <empty> placeholder when opening empty directories
 #
 
 """Textual-based file browser application."""
@@ -56,18 +57,20 @@ import sys
 import locale
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Any, Tuple, Dict
+from typing import Optional, Any, Tuple, Dict, Iterable
 from enum import Enum
 from .file_info import FileInfo
 
-from textual import on
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
 from textual.widgets import Header, Footer, Label, RadioButton, RadioSet, Button
-from textual.widgets._directory_tree import DirectoryTree
+from textual.widgets._directory_tree import DirectoryTree, DirEntry
+from textual.widgets._tree import TreeNode
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, Vertical
 from textual.screen import ModalScreen
+from textual.worker import get_current_worker, WorkerCancelled, WorkerFailed
 from rich.text import Text
 
 # Constants
@@ -643,6 +646,65 @@ class CustomDirectoryTree(DirectoryTree):
                 # Check if we should navigate into it
                 # For now, let the default behavior handle it
                 pass
+
+    def _populate_node(self, node: TreeNode[DirEntry], content: Iterable[Path]) -> None:
+        """Populate the given tree node with the given directory content.
+
+        This override handles empty directories by showing an <empty> placeholder.
+
+        Args:
+            node: The Tree node to populate.
+            content: The collection of `Path` objects to populate the node with.
+        """
+        node.remove_children()
+
+        # Convert to list to check if empty
+        content_list = list(content)
+
+        if not content_list:
+            # Directory is empty, add a placeholder
+            node.add_leaf("<empty>", data=None)
+        else:
+            # Normal population for non-empty directories
+            for path in content_list:
+                node.add(
+                    path.name,
+                    data=DirEntry(path),
+                    allow_expand=self._safe_is_dir(path),
+                )
+
+        node.expand()
+
+    @work(exclusive=True)
+    async def _loader(self) -> None:
+        """Background loading queue processor.
+
+        This override ensures empty directories still get populated with a placeholder.
+        """
+        worker = get_current_worker()
+        while not worker.is_cancelled:
+            # Get the next node that needs loading off the queue.
+            node = await self._load_queue.get()
+            content: list[Path] = []
+            async with self.lock:
+                cursor_node = self.cursor_node
+                try:
+                    # Load the content of the directory associated with that node.
+                    content = await self._load_directory(node).wait()
+                except WorkerCancelled:
+                    # The worker was cancelled, we should exit.
+                    break
+                except WorkerFailed:
+                    # This particular worker failed to start.
+                    pass
+                else:
+                    # Always populate the node, even if content is empty
+                    self._populate_node(node, content)
+                    if cursor_node is not None:
+                        self.move_cursor(cursor_node, animate=False)
+                finally:
+                    # Mark this iteration as done.
+                    self._load_queue.task_done()
 
 
 class FileBrowserApp(App[Optional[FileInfo]]):
