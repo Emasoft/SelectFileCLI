@@ -21,13 +21,7 @@ jobs:
           uv sync --all-extras --dev
       - name: Install actionlint
         run: |
-          curl -s https://api.github.com/repos/rhysd/actionlint/releases/latest | \
-          grep '"browser_download_url"' | \
-          grep 'linux_amd64' | \
-          cut -d'"' -f4 | \
-          wget -qi -
-          tar -xzf actionlint_*_linux_amd64.tar.gz actionlint
-          chmod +x actionlint
+          curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
           sudo mv actionlint /usr/local/bin/
       - name: Lint with ruff
         run: |
