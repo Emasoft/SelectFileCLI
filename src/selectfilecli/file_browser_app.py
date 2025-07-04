@@ -68,6 +68,8 @@
 # - Implemented navigation history with back/forward buttons
 # - Fixed column alignment to be left-aligned with dynamic width calculation
 # - Calculate column width based on longest filename + 1 character padding
+# - Added loading indicator during navigation operations using container.loading
+# - Show visual feedback when changing directories
 #
 
 """Textual-based file browser application."""
@@ -86,7 +88,7 @@ from .file_info import FileInfo
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.reactive import reactive
-from textual.widgets import Header, Footer, Label, RadioButton, RadioSet, Button
+from textual.widgets import Header, Footer, Label, RadioButton, RadioSet, Button, LoadingIndicator
 from textual.widgets._directory_tree import DirectoryTree, DirEntry
 from textual.widgets._tree import TreeNode, Tree
 from textual.binding import Binding
@@ -1432,29 +1434,44 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         # Update path display immediately
         self._update_path_display(str(self.current_path))
 
+        # Show loading indicator by setting the container's loading state
+        container = self.query_one("#tree-container")
+        container.loading = True
+
         # Use a worker to handle the tree replacement
         self._replace_tree_worker()
 
     @work(exclusive=True)
     async def _replace_tree_worker(self) -> None:
         """Worker to replace the directory tree without blocking the UI."""
-        # Get the container
-        container = self.query_one("#tree-container")
-        old_tree = container.query_one(CustomDirectoryTree)
+        try:
+            # Get the container
+            container = self.query_one("#tree-container")
 
-        # Create new tree with updated path
-        new_tree = CustomDirectoryTree(str(self.current_path), id="directory-tree")
-        new_tree.tree_sort_mode = self.current_sort_mode
-        new_tree.tree_sort_order = self.current_sort_order
-        new_tree.allow_file_select = self.select_files
-        new_tree.allow_dir_select = self.select_dirs
+            # Find and remove the old tree if it exists
+            try:
+                old_tree = container.query_one(CustomDirectoryTree)
+                await old_tree.remove()
+            except Exception:
+                # Old tree might not exist yet
+                pass
 
-        # Remove old tree and mount new one
-        await old_tree.remove()
-        await container.mount(new_tree)
+            # Create new tree with updated path
+            new_tree = CustomDirectoryTree(str(self.current_path), id="directory-tree")
+            new_tree.tree_sort_mode = self.current_sort_mode
+            new_tree.tree_sort_order = self.current_sort_order
+            new_tree.allow_file_select = self.select_files
+            new_tree.allow_dir_select = self.select_dirs
 
-        # Focus the new tree after mounting
-        new_tree.focus()
+            # Mount the new tree
+            await container.mount(new_tree)
+
+            # Focus the new tree after mounting
+            new_tree.focus()
+        finally:
+            # Always hide the loading indicator when done
+            container = self.query_one("#tree-container")
+            container.loading = False
 
     def on_resize(self, event: Any) -> None:
         """Handle terminal resize events."""
