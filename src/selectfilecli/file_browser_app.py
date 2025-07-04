@@ -52,6 +52,9 @@
 # - Added proper handling of loading states in render_label
 # - Skip placeholders from sorting to avoid errors
 # - Show root node immediately with loading placeholder during navigation
+# - Fixed issue #7: Added OK and Cancel buttons to sort dialog
+# - Fixed issue #7: Improved Enter key handling in sort dialog
+# - Fixed issue #7: Sort dialog now properly shows current settings when opened
 #
 
 """Textual-based file browser application."""
@@ -149,6 +152,17 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
         text-style: bold;
         margin-bottom: 1;
     }
+
+    SortDialog #button-container {
+        height: 3;
+        align: center middle;
+        margin-top: 1;
+    }
+
+    SortDialog #button-container Button {
+        margin: 0 1;
+        min-width: 10;
+    }
     """
 
     def __init__(self, current_mode: SortMode, current_order: SortOrder):
@@ -193,16 +207,51 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
                     value=True if self.current_order == SortOrder.DESCENDING else False,
                 )
 
+            # Add button container
+            with Horizontal(id="button-container"):
+                yield Button("OK", variant="primary", id="ok-button")
+                yield Button("Cancel", variant="default", id="cancel-button")
+
             yield Label("[Enter] Select  [Escape] Cancel", classes="help")
 
     def on_mount(self) -> None:
-        """Set initial focus."""
-        self.query_one("#sort-modes").focus()
+        """Set initial focus and properly select current values."""
+        # Set the correct radio button selections based on current values
+        mode_set = self.query_one("#sort-modes", RadioSet)
+        order_set = self.query_one("#sort-order", RadioSet)
+
+        # Find and toggle the correct mode button
+        modes = list(SortMode)
+        mode_buttons = list(mode_set.query(RadioButton))
+        for i, mode in enumerate(modes):
+            if mode == self.current_mode and i < len(mode_buttons):
+                mode_buttons[i].value = True
+                break
+
+        # Find and toggle the correct order button
+        order_buttons = list(order_set.query(RadioButton))
+        if self.current_order == SortOrder.ASCENDING and len(order_buttons) > 0:
+            order_buttons[0].value = True
+        elif len(order_buttons) > 1:
+            order_buttons[1].value = True
+
+        # Focus on the mode selection
+        mode_set.focus()
 
     @on(RadioSet.Changed)
     def on_radio_changed(self, event: RadioSet.Changed) -> None:
         """Handle radio selection."""
         pass  # Just track the selection
+
+    @on(Button.Pressed, "#ok-button")
+    def on_ok_pressed(self) -> None:
+        """Handle OK button press."""
+        self.action_submit()
+
+    @on(Button.Pressed, "#cancel-button")
+    def on_cancel_pressed(self) -> None:
+        """Handle Cancel button press."""
+        self.dismiss(None)
 
     def action_submit(self) -> None:
         """Submit the selected values."""
@@ -228,8 +277,12 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
     def on_key(self, event: Any) -> None:
         """Handle key events."""
         if event.key == "enter":
-            event.stop()
-            self.action_submit()
+            # Don't prevent default behavior for radio button selection
+            # Only submit if we're not in a RadioSet
+            focused = self.focused
+            if not isinstance(focused, RadioSet):
+                event.stop()
+                self.action_submit()
         elif event.key == "escape":
             event.stop()
             self.dismiss(None)

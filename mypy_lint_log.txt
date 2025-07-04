@@ -1,4 +1,0 @@
-src/selectfilecli/file_browser_app.py: note: In member "on_tree_node_expanded" of class "CustomDirectoryTree":
-src/selectfilecli/file_browser_app.py:676: error: "on_tree_node_expanded" undefined in superclass  [misc]
-            super().on_tree_node_expanded(event)
-            ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~
