@@ -11,6 +11,7 @@
 # - Added all fields requested by the user for the tuple return type
 # - Made all fields optional to handle cases where info is not available
 # - Added error_message field to handle file access errors (issue #10)
+# - Fixed type annotations for __iter__ and as_tuple methods
 #
 
 """File information data structure for selectfilecli."""
@@ -62,7 +63,7 @@ class FileInfo:
     error_message: Optional[str] = None
     """Error message if file/folder access failed (when not None, other fields should be ignored)."""
 
-    def __iter__(self) -> Iterator[Union[Path, datetime, int, bool, str, None]]:
+    def __iter__(self) -> Iterator[Optional[Union[Path, datetime, int, bool, str]]]:
         """Allow unpacking as tuple for backward compatibility.
 
         Returns values in the order specified by the user:
@@ -71,7 +72,7 @@ class FileInfo:
         """
         return iter((self.file_path, self.folder_path, self.last_modified_datetime, self.creation_datetime, self.size_in_bytes, self.readonly, self.folder_has_venv, self.is_symlink, self.symlink_broken, self.error_message))
 
-    def as_tuple(self) -> Tuple[Union[Path, datetime, int, bool, str, None], ...]:
+    def as_tuple(self) -> Tuple[Optional[Union[Path, datetime, int, bool, str]], ...]:
         """Convert to tuple representation."""
         return tuple(self)
 
