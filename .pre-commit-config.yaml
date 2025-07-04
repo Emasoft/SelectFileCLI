@@ -105,7 +105,7 @@ repos:
         name: Lint YAML files
         entry: uv run yamllint
         language: system
-        types: [yaml]
+        files: '^\.github/.*\.(yml|yaml)$'
         pass_filenames: true
         stages: [pre-commit]
         require_serial: true
