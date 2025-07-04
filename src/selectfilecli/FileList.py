@@ -8,6 +8,7 @@
 
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
 # - Added proper shebang and encoding declaration
+# - Fixed path handling to use absolute paths, preventing issues with relative paths in recursion
 #
 
 import os
@@ -23,7 +24,8 @@ class FileList:
         Args:
             path: The directory path to start from
         """
-        self.path = path
+        # Always use absolute path to avoid relative path issues in recursion
+        self.path = os.path.abspath(path)
         self.tree: Dict[str, List[os.DirEntry[Any]]] = dict()
 
     def get_entry_list(self) -> List[os.DirEntry[Any]]:
