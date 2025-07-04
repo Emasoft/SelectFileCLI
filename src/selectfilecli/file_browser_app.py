@@ -44,6 +44,7 @@
 # - Fixed directory change async black screen issue
 # - Added Enter key binding to navigate into directories
 # - Fixed Enter key not working in sort dialog
+# - Fixed UI layout: added padding-top to main container to prevent header subtitle overlap
 #
 
 """Textual-based file browser application."""
@@ -660,6 +661,8 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         height: 100%;
         layer: base;
         layout: vertical;
+        /* Add top padding to account for Header with subtitle (3 units tall) */
+        padding-top: 1;
     }
 
     #navigation-bar {
