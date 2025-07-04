@@ -44,12 +44,25 @@
 
 - 🎨 **Modern TUI** - Built with the powerful Textual framework for beautiful terminal interfaces
 - 📁 **Intuitive Navigation** - Easy file and directory browsing with keyboard controls
-- 🔍 **Advanced Sorting** - Multiple sort modes: Name, Date, Size, Extension
+- 🔍 **Advanced Sorting** - Multiple sort modes: Name, Date, Size, Extension with memory
 - ⌨️ **Keyboard-Driven** - Fully accessible via keyboard with vim-style shortcuts
-- 🎯 **Simple API** - Just one function call: `select_file()`
+- 🎯 **Simple API** - Just one function call: `select_file()` with backward compatibility
 - 🖥️ **Cross-Platform** - Works on Linux, macOS, and Windows (experimental)
 - 🧪 **Well-Tested** - 93.92% test coverage with snapshot testing
 - 📦 **Zero Config** - Works out of the box, no configuration needed
+
+### New in v0.4.5
+
+- 📆 **Enhanced DateTime Display** - Fixed 24h format with emojis: `📆YYYY-MM-DD 🕚HH:MM:SS`
+- 📊 **File Size Formatting** - Localized number formatting with proper units (KB, MB, GB)
+- 🎯 **Visual Navigation** - Emoji buttons with underlined shortcuts: 🔼Parent(u) 🏠Home(h) ⏫Root(r)
+- 🎨 **ls-style Visual Cues** - File type indicators: `/` dirs, `*` executable, `@` symlinks
+- ✨ **Virtual Environment Detection** - Folders containing Python venvs marked with ✨
+- 📁 **Folder Selection** - Select directories with configurable options
+- 📋 **Comprehensive FileInfo** - Returns detailed file/folder information
+- 🚀 **Performance** - Async loading with visual feedback, column-aligned entries
+- ❌ **Error Handling** - Graceful error messages in FileInfo.error_message
+- 📐 **Responsive UI** - Real-time terminal resizing support
 
 ## 📋 Requirements
 
@@ -105,18 +118,76 @@ else:
 
 ## 📖 Usage Examples
 
-### Basic File Selection
+### Basic File Selection (Backward Compatible)
 
 ```python
 from selectfilecli import select_file
 
-# Start from a specific directory
-selected_file = select_file("/home/user/documents")
+# Returns string path for backward compatibility
+selected_file = select_file()
 
 if selected_file:
-    with open(selected_file, 'r') as f:
-        content = f.read()
-        print(f"File content: {content[:100]}...")
+    print(f"You selected: {selected_file}")
+else:
+    print("No file selected")
+```
+
+### Advanced File Selection with FileInfo
+
+```python
+from selectfilecli import select_file
+
+# Get comprehensive file information
+result = select_file(return_info=True)
+
+if result and result.error_message:
+    print(f"Error: {result.error_message}")
+elif result and result.file_path:
+    print(f"📄 File: {result.file_path}")
+    print(f"   Size: {result.size_in_bytes:,} bytes")
+    print(f"   Modified: 📆{result.last_modified_datetime:%Y-%m-%d} 🕚{result.last_modified_datetime:%H:%M:%S}")
+    print(f"   Read-only: {'Yes ⛔' if result.readonly else 'No ✅'}")
+    if result.is_symlink:
+        print(f"   Symlink: {'Broken 🔗💔' if result.symlink_broken else 'Yes 🔗'}")
+```
+
+### Folder Selection
+
+```python
+from selectfilecli import select_file
+
+# Select folders only
+result = select_file(
+    select_files=False,
+    select_dirs=True,
+    return_info=True
+)
+
+if result and result.folder_path:
+    print(f"📁 Folder: {result.folder_path}")
+    print(f"   Has venv: {'Yes ✨' if result.folder_has_venv else 'No'}")
+    if result.size_in_bytes:
+        print(f"   Size: {result.size_in_bytes:,} bytes (recursive)")
+```
+
+### Mixed Mode - Files and Folders
+
+```python
+from selectfilecli import select_file
+
+# Allow selection of both files and folders
+# Press 'd' to select current directory, Enter for files
+result = select_file(
+    select_files=True,
+    select_dirs=True,
+    return_info=True
+)
+
+if result:
+    if result.file_path:
+        print(f"Selected file: {result.file_path}")
+    elif result.folder_path:
+        print(f"Selected folder: {result.folder_path}")
 ```
 
 ### Integration with Click CLI
@@ -129,13 +200,16 @@ from selectfilecli import select_file
 @click.option('--input-file', help='Input file path')
 def process_file(input_file):
     if not input_file:
-        # Let user select file interactively
-        input_file = select_file()
-        if not input_file:
+        # Let user select file interactively with detailed info
+        result = select_file(return_info=True)
+        if not result or not result.file_path:
             click.echo("No file selected.")
             return
 
-    click.echo(f"Processing: {input_file}")
+        input_file = result.file_path
+        click.echo(f"Processing: {input_file}")
+        click.echo(f"File size: {result.size_in_bytes:,} bytes")
+
     # Your processing logic here
 
 if __name__ == '__main__':
@@ -150,6 +224,8 @@ from selectfilecli import select_file
 
 def load_config():
     config_dir = Path.home() / '.config' / 'myapp'
+
+    # Use backward compatible mode for simple path return
     config_file = select_file(str(config_dir))
 
     if config_file and config_file.endswith('.json'):
@@ -170,10 +246,13 @@ def load_config():
 | `↑` / `k` | Move up | Navigate to previous item |
 | `↓` / `j` | Move down | Navigate to next item |
 | `Enter` | Select / Open | Select file or enter directory |
-| `Backspace` | Go back | Navigate to parent directory |
-| `s` | Sort menu | Open sort options dialog |
-| `q` / `Ctrl+C` | Quit | Exit without selecting |
-| `Escape` | Cancel | Cancel current operation |
+| `u` / `Backspace` | Parent Directory 🔼 | Navigate to parent directory |
+| `h` | Home Directory 🏠 | Go to user's home directory |
+| `r` | Root Directory ⏫ | Go to system root (/) |
+| `d` | Select Directory | Select current directory (when dirs enabled) |
+| `s` | Sort Menu 📊 | Open sort options dialog |
+| `q` / `Escape` | Cancel ❌ | Exit without selecting |
+| `Ctrl+C` | Force Quit | Immediate exit |
 
 ### Sort Dialog Controls
 
