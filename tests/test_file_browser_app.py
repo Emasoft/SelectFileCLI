@@ -32,6 +32,8 @@
 # - Added tests for rapid navigation stability
 # - Added tests for focus preservation after navigation
 # - Added test for empty directory display showing <empty> placeholder
+# - Updated tests for FileInfo to include error_message field (issue #10)
+# - Added test_file_info_error_handling to verify error message population
 #
 
 """Tests for the Textual file browser application."""
@@ -160,6 +162,8 @@ class TestFileBrowserApp:
             result = pilot.app.return_value
             assert isinstance(result, FileInfo)
             assert all(value is None for value in result.as_tuple())
+            # Verify all 10 fields are None including error_message
+            assert len(result.as_tuple()) == 10
 
     @pytest.mark.asyncio
     async def test_escape_quit(self, temp_directory):
@@ -170,6 +174,8 @@ class TestFileBrowserApp:
             result = pilot.app.return_value
             assert isinstance(result, FileInfo)
             assert all(value is None for value in result.as_tuple())
+            # Verify all 10 fields are None including error_message
+            assert len(result.as_tuple()) == 10
 
     @pytest.mark.asyncio
     async def test_directory_tree_navigation(self, temp_directory):
@@ -1640,10 +1646,10 @@ class TestNewFeatures:
         """Test FileInfo can be unpacked as tuple."""
         from datetime import datetime
 
-        info = FileInfo(file_path=Path("/test/file.txt"), folder_path=None, last_modified_datetime=datetime.now(), creation_datetime=datetime.now(), size_in_bytes=1024, readonly=False, folder_has_venv=None, is_symlink=False, symlink_broken=False)
+        info = FileInfo(file_path=Path("/test/file.txt"), folder_path=None, last_modified_datetime=datetime.now(), creation_datetime=datetime.now(), size_in_bytes=1024, readonly=False, folder_has_venv=None, is_symlink=False, symlink_broken=False, error_message=None)
 
         # Test unpacking
-        (file_path, folder_path, last_mod, creation, size, readonly, has_venv, is_link, link_broken) = info
+        (file_path, folder_path, last_mod, creation, size, readonly, has_venv, is_link, link_broken, error_msg) = info
 
         assert file_path == Path("/test/file.txt")
         assert folder_path is None
@@ -1654,12 +1660,48 @@ class TestNewFeatures:
         assert has_venv is None
         assert is_link is False
         assert link_broken is False
+        assert error_msg is None
 
         # Test as_tuple method
         t = info.as_tuple()
         assert isinstance(t, tuple)
-        assert len(t) == 9
+        assert len(t) == 10
         assert t[0] == Path("/test/file.txt")
+
+    @pytest.mark.asyncio
+    async def test_file_info_error_handling(self) -> None:
+        """Test FileInfo error_message population on file access errors."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            test_dir = Path(tmpdir)
+
+            # Create a file with no read permissions
+            protected_file = test_dir / "protected.txt"
+            protected_file.write_text("secret")
+            os.chmod(protected_file, 0o000)
+
+            try:
+                app = FileBrowserApp()
+                async with app.run_test() as pilot:
+                    # Mock the _create_file_info to trigger an error
+                    with patch.object(Path, "lstat", side_effect=PermissionError("Permission denied")):
+                        pilot.app._create_file_info(protected_file, is_file=True)
+
+                        # Check that FileInfo has error_message populated
+                        result = pilot.app.selected_item
+                        assert isinstance(result, FileInfo)
+                        assert result.error_message == "Permission denied"
+                        assert result.file_path == protected_file
+                        assert result.folder_path is None
+                        # Other fields should be None when error occurs
+                        assert result.last_modified_datetime is None
+                        assert result.size_in_bytes is None
+                        assert result.readonly is None
+            finally:
+                # Restore permissions for cleanup
+                try:
+                    os.chmod(protected_file, 0o644)
+                except (OSError, PermissionError):
+                    pass
 
     @pytest.mark.asyncio
     async def test_recursive_directory_size(self) -> None:

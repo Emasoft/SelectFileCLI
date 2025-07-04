@@ -14,6 +14,7 @@
 # - Added support for folder selection with select_files and select_dirs parameters
 # - Changed return type to FileInfo dataclass with comprehensive file information
 # - Added backward compatibility mode that returns string when only file selection is enabled
+# - Updated FileInfo handling to check for error_message field (issue #10)
 #
 
 """
@@ -123,4 +124,4 @@ def select_file(start_path: Optional[str] = None, select_files: bool = True, sel
 
 
 __all__ = ["select_file", "FileInfo"]
-__version__ = "0.4.4"  # Follow semantic versioning
+__version__ = "0.4.5"  # Follow semantic versioning

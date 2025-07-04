@@ -10,6 +10,7 @@
 # - Created FileInfo dataclass to represent comprehensive file/folder information
 # - Added all fields requested by the user for the tuple return type
 # - Made all fields optional to handle cases where info is not available
+# - Added error_message field to handle file access errors (issue #10)
 #
 
 """File information data structure for selectfilecli."""
@@ -26,6 +27,9 @@ class FileInfo:
 
     All fields are optional and will be None if the information is not available
     or not applicable (e.g., file_path for a directory selection).
+
+    When error_message is not None, it indicates an error occurred while accessing
+    the file/folder, and other fields should be ignored.
     """
 
     file_path: Optional[Path] = None
@@ -55,16 +59,19 @@ class FileInfo:
     symlink_broken: Optional[bool] = None
     """True if the item is a broken symbolic link (target doesn't exist)."""
 
-    def __iter__(self) -> Iterator[Union[Path, datetime, int, bool, None]]:
+    error_message: Optional[str] = None
+    """Error message if file/folder access failed (when not None, other fields should be ignored)."""
+
+    def __iter__(self) -> Iterator[Union[Path, datetime, int, bool, str, None]]:
         """Allow unpacking as tuple for backward compatibility.
 
         Returns values in the order specified by the user:
         (file_path, folder_path, last_modified_datetime, creation_datetime,
-         size_in_bytes, readonly, folder_has_venv, is_symlink, symlink_broken)
+         size_in_bytes, readonly, folder_has_venv, is_symlink, symlink_broken, error_message)
         """
-        return iter((self.file_path, self.folder_path, self.last_modified_datetime, self.creation_datetime, self.size_in_bytes, self.readonly, self.folder_has_venv, self.is_symlink, self.symlink_broken))
+        return iter((self.file_path, self.folder_path, self.last_modified_datetime, self.creation_datetime, self.size_in_bytes, self.readonly, self.folder_has_venv, self.is_symlink, self.symlink_broken, self.error_message))
 
-    def as_tuple(self) -> Tuple[Union[Path, datetime, int, bool, None], ...]:
+    def as_tuple(self) -> Tuple[Union[Path, datetime, int, bool, str, None], ...]:
         """Convert to tuple representation."""
         return tuple(self)
 

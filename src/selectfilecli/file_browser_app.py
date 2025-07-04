@@ -59,6 +59,7 @@
 # - Added column width calculation and dynamic formatting based on terminal width
 # - Handles long filenames by truncating with ellipsis when necessary
 # - Adjusts column display based on available space (omits date in narrow terminals)
+# - Fixed issue #10: Added error_message to FileInfo to handle file access errors
 #
 
 """Textual-based file browser application."""
@@ -1188,9 +1189,14 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             self.selected_item = info
             self.exit(self.selected_item)
         except (OSError, IOError, PermissionError, ValueError) as e:
-            # If we can't get file info, exit without selection
-            # Log the error for debugging if needed
-            self.exit(None)
+            # Create FileInfo with error message
+            error_info = FileInfo(
+                file_path=path if is_file else None,
+                folder_path=path if not is_file else None,
+                error_message=str(e),
+            )
+            self.selected_item = error_info
+            self.exit(self.selected_item)
 
     def _check_venv(self, path: Path) -> bool:
         """Check if directory contains a virtual environment."""
@@ -1235,6 +1241,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             folder_has_venv=None,
             is_symlink=None,
             symlink_broken=None,
+            error_message=None,
         )
         self.exit(cancel_info)
 
