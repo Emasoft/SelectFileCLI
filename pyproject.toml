@@ -1,6 +1,6 @@
 [project]
 name = "selectfilecli"
-version = "0.4.2"
+version = "0.4.3"
 description = "A handy file selection browser for CLI applications using Textual TUI"
 readme = "README.md"
 authors = [
