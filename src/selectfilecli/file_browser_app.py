@@ -39,6 +39,11 @@
 # - Fixed edge cases: negative file sizes, Windows drive detection, filename escaping
 # - Added venv detection caching for performance
 # - Fixed sort dialog button handling
+# - Fixed navigation bar overlapping with header using dock: top CSS property
+# - Fixed path display showing function representation issue
+# - Fixed directory change async black screen issue
+# - Added Enter key binding to navigate into directories
+# - Fixed Enter key not working in sort dialog
 #
 
 """Textual-based file browser application."""
@@ -213,8 +218,10 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
     def on_key(self, event: Any) -> None:
         """Handle key events."""
         if event.key == "enter":
+            event.stop()
             self.action_submit()
         elif event.key == "escape":
+            event.stop()
             self.dismiss(None)
 
 
@@ -626,6 +633,16 @@ class CustomDirectoryTree(DirectoryTree):
         # This is handled by the app's on_directory_selected method now
         pass
 
+    def on_key(self, event: Any) -> None:
+        """Handle key events in the directory tree."""
+        if event.key == "enter" and self.cursor_node:
+            # Check if we're on a directory
+            path = self._get_path_from_node_data(self.cursor_node.data)
+            if path and path.is_dir():
+                # Check if we should navigate into it
+                # For now, let the default behavior handle it
+                pass
+
 
 class FileBrowserApp(App[Optional[FileInfo]]):
     """A Textual app for browsing and selecting files with sorting options.
@@ -642,6 +659,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         width: 100%;
         height: 100%;
         layer: base;
+        layout: vertical;
     }
 
     #tree-container {
@@ -664,6 +682,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         padding: 0 1;
         height: 1;
         width: 100%;
+        dock: top;
     }
 
     #navigation-bar {
@@ -672,6 +691,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         padding: 0 1;
         width: 100%;
         layout: horizontal;
+        dock: top;
     }
 
     #navigation-bar Button {
@@ -689,6 +709,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         Binding("h", "go_home", "Home", show=True),
         Binding("r", "go_root", "Root", show=True),
         Binding("d", "select_current_directory", "Select Dir", show=False),
+        Binding("enter", "navigate_or_select", "Navigate/Select", show=False),
     ]
 
     def __init__(self, start_path: str = ".", select_files: bool = True, select_dirs: bool = False):
@@ -773,15 +794,21 @@ class FileBrowserApp(App[Optional[FileInfo]]):
         Args:
             event: The directory selection event containing the selected path.
         """
-        # Default behavior - toggle expand/collapse
+        # Get the path from the event
         tree = self.query_one("#directory-tree", CustomDirectoryTree)
         node = event.node
-        if node.is_expanded:
-            node.collapse()
-        else:
-            node.expand()
-            tree.sort_children_by_mode(node)
-        tree.refresh()
+
+        # Check if this is a double-click or Enter key navigation
+        path = tree._get_path_from_node_data(node.data)
+        if path and path.is_dir():
+            # Check if Enter key was pressed (navigate into directory)
+            # For now, just toggle expand/collapse
+            if node.is_expanded:
+                node.collapse()
+            else:
+                node.expand()
+                tree.sort_children_by_mode(node)
+            tree.refresh()
 
     def _create_file_info(self, path: Path, is_file: bool) -> None:
         """Create FileInfo object and exit the app."""
@@ -831,12 +858,21 @@ class FileBrowserApp(App[Optional[FileInfo]]):
     def on_node_highlighted(self, event: DirectoryTree.NodeHighlighted[Any]) -> None:
         """Update path display when node is highlighted."""
         if event.node and event.node.data:
-            self._update_path_display(str(event.node.data))
+            # Handle different data types properly
+            tree = self.query_one("#directory-tree", CustomDirectoryTree)
+            path = tree._get_path_from_node_data(event.node.data)
+            if path:
+                self._update_path_display(str(path))
 
     def _update_path_display(self, path: str) -> None:
         """Update the path display label."""
         path_label = self.query_one("#path-display", Label)
-        path_label.update(f"Path: {path}")
+        # Format the path properly - ensure it's a string
+        if hasattr(path, "__call__"):
+            # If it's a function/method, don't display it
+            return
+        path_str = str(path) if path else ""
+        path_label.update(f"Path: {path_str}")
 
     async def action_quit(self) -> None:
         """Quit the application without selecting a file."""
@@ -883,6 +919,23 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             if path and path.is_dir():
                 self._create_file_info(path, is_file=False)
 
+    async def action_navigate_or_select(self) -> None:
+        """Navigate into directory with Enter key or select file."""
+        tree = self.query_one("#directory-tree", CustomDirectoryTree)
+        if not tree.cursor_node or not tree.cursor_node.data:
+            return
+
+        path = tree._get_path_from_node_data(tree.cursor_node.data)
+        if not path:
+            return
+
+        if path.is_dir():
+            # Navigate into the directory
+            await self._change_directory(path)
+        elif path.is_file() and self.select_files:
+            # Select the file
+            self._create_file_info(path, is_file=True)
+
     @on(Button.Pressed, "#parent-button")
     async def on_parent_button(self) -> None:
         """Handle parent button click."""
@@ -928,19 +981,22 @@ class FileBrowserApp(App[Optional[FileInfo]]):
 
         self.current_path = new_path
 
-        # Remove old tree and create new one
+        # Get the container
         container = self.query_one("#tree-container")
-        await container.query_one(CustomDirectoryTree).remove()
+        old_tree = container.query_one(CustomDirectoryTree)
 
-        # Create new tree with updated path
+        # Create new tree with updated path BEFORE removing old one
         new_tree = CustomDirectoryTree(str(self.current_path), id="directory-tree")
         new_tree.tree_sort_mode = self.current_sort_mode
         new_tree.tree_sort_order = self.current_sort_order
         new_tree.allow_file_select = self.select_files
         new_tree.allow_dir_select = self.select_dirs
+
+        # Remove old tree and mount new one
+        await old_tree.remove()
         await container.mount(new_tree)
 
-        # Focus the new tree
+        # Focus the new tree after mounting
         new_tree.focus()
 
         # Update path display
