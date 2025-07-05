@@ -6,7 +6,7 @@ The SelectFileCLI project has two types of loading indicators:
 
 ### 1. Navigation Loading ✅ (Working)
 - **When**: Changing directories via navigation (Enter, Parent button, etc.)
-- **How**: Uses Textual's `container.loading = True` 
+- **How**: Uses Textual's `container.loading = True`
 - **Visual**: Shows a spinning overlay on the entire tree container
 - **Code Location**: `_change_directory()` method sets loading state
 

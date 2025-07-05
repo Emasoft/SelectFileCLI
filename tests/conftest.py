@@ -49,41 +49,19 @@ def pytest_configure(config):
         config.option.dist = "no"
 
 
-def pytest_cmdline_preparse(config, args):
-    """Preprocess command line arguments to enforce sequential execution."""
-    # Remove any parallel execution flags
-    filtered_args = []
-    skip_next = False
-
-    for arg in args:
-        if skip_next:
-            skip_next = False
-            continue
-
-        if arg in ["-n", "--numprocesses", "--dist"]:
-            skip_next = True
-            continue
-        elif arg.startswith("-n=") or arg.startswith("--numprocesses="):
-            continue
-        elif arg == "--dist=loadscope" or arg == "--dist=each":
-            continue
-        else:
-            filtered_args.append(arg)
-
-    args[:] = filtered_args
+# Command line preprocessing removed - handled by pytest.ini instead
 
 
 @pytest.fixture(autouse=True)
 def enforce_sequential_execution():
     """Fixture that runs for every test to enforce sequential execution."""
     # Set environment variables for each test
-    os.environ["PYTEST_CURRENT_TEST"] = "1"
     os.environ["PROJECT_SEQUENTIAL_MODE"] = "1"
 
     yield
 
     # Cleanup after test
-    os.environ.pop("PYTEST_CURRENT_TEST", None)
+    os.environ.pop("PROJECT_SEQUENTIAL_MODE", None)
 
 
 def is_running_in_docker() -> bool:

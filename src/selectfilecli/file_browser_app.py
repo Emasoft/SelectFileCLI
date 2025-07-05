@@ -951,14 +951,14 @@ class CustomDirectoryTree(DirectoryTree):
 
     def _add_loading_placeholder(self, node: TreeNode[DirEntry]) -> None:
         """Add a loading placeholder to a node while its content is being loaded.
-        
+
         Args:
             node: The tree node to add the placeholder to
         """
         # Add a temporary loading placeholder
         node.add_leaf("<...loading...>", data=None)
-    
-    def _on_tree_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
+
+    async def _on_tree_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
         """Override to add loading indicator when a node is expanded."""
         node = event.node
         # Add loading indicator before calling parent
@@ -969,9 +969,9 @@ class CustomDirectoryTree(DirectoryTree):
                 loading_node = node.add_leaf("<...loading...>", data=None)
                 # Store reference to remove later
                 node._loading_placeholder = loading_node
-        
+
         # Always call parent implementation to handle the actual loading
-        super()._on_tree_node_expanded(event)
+        await super()._on_tree_node_expanded(event)
 
     def _populate_node(self, node: TreeNode[DirEntry], content: Iterable[Path]) -> None:
         """Populate the given tree node with the given directory content.
@@ -983,13 +983,13 @@ class CustomDirectoryTree(DirectoryTree):
             content: The collection of `Path` objects to populate the node with.
         """
         # First, remove any loading placeholder or existing children
-        if hasattr(node, '_loading_placeholder') and node._loading_placeholder:
+        if hasattr(node, "_loading_placeholder") and node._loading_placeholder:
             try:
                 node._loading_placeholder.remove()
             except Exception:
                 pass
             node._loading_placeholder = None
-        
+
         # Remove all children to start fresh
         node.remove_children()
 
