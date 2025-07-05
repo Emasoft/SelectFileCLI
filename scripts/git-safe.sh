@@ -12,15 +12,10 @@ if [ -n "${GIT_DIR:-}" ] || [ -n "${GIT_WORK_TREE:-}" ]; then
     exec git "$@"
 fi
 
-# Skip if called from pre-commit
-if [ -n "${PRE_COMMIT_RUNNING:-}" ]; then
-    # Pre-commit is running - execute directly
-    exec git "$@"
-fi
-
-# Check if we're running a commit and set flag for pre-commit hooks
+# For commits, set flag so pre-commit hooks know they're part of this operation
 if [[ "$1" == "commit" ]]; then
-    export PRE_COMMIT_RUNNING=1
+    export GIT_COMMIT_IN_PROGRESS=1
+    export SEQUENTIAL_EXECUTOR_PID=$$  # Prevent nested sequential execution
 fi
 
 # Get project info

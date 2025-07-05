@@ -1,1 +1,1 @@
-sequential-executor-v2.sh
+sequential-executor-strict.sh
