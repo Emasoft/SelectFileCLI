@@ -25,33 +25,32 @@ if [ ! -x "$SEQUENTIAL_EXECUTOR" ]; then
     chmod +x "$SEQUENTIAL_EXECUTOR"
 fi
 
-# 2. Check safe-run.sh delegates to sequential executor
-SAFE_RUN="$PROJECT_ROOT/scripts/safe-run.sh"
-if [ -f "$SAFE_RUN" ]; then
-    if ! grep -q "sequential-executor.sh" "$SAFE_RUN"; then
-        echo -e "${RED}ERROR: safe-run.sh does not use sequential executor${NC}"
-        exit 1
-    fi
-    chmod +x "$SAFE_RUN"
-    echo -e "${GREEN}✓ safe-run.sh properly configured${NC}"
+# 2. Check wait_all.sh exists and is executable
+WAIT_ALL="$PROJECT_ROOT/scripts/wait_all.sh"
+if [ -f "$WAIT_ALL" ]; then
+    chmod +x "$WAIT_ALL"
+    echo -e "${GREEN}✓ wait_all.sh properly configured${NC}"
+else
+    echo -e "${RED}ERROR: wait_all.sh not found${NC}"
+    exit 1
 fi
 
 # 3. Install/Update ALL git hooks with safety checks
 HOOKS_DIR="$PROJECT_ROOT/.git/hooks"
 if [ -d "$HOOKS_DIR" ]; then
     echo -e "${YELLOW}Installing/updating git hooks with safety checks...${NC}"
-    
+
     # Function to create hook with standard header
     create_hook() {
         local hook_name=$1
         local hook_path="$HOOKS_DIR/$hook_name"
-        
+
         # Backup existing hook if it exists and isn't ours
         if [ -f "$hook_path" ] && ! grep -q "Sequential execution safety" "$hook_path" 2>/dev/null; then
             echo -e "${YELLOW}Backing up existing $hook_name hook to ${hook_name}.backup${NC}"
             mv "$hook_path" "${hook_path}.backup"
         fi
-        
+
         # Copy our enhanced hooks
         case "$hook_name" in
             pre-commit)
@@ -63,7 +62,8 @@ if [ -d "$HOOKS_DIR" ]; then
 #!/usr/bin/env bash
 # Sequential execution safety hook
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-"$PROJECT_ROOT/scripts/wait_all.sh" -- "$PROJECT_ROOT/scripts/sequential-executor.sh" pre-commit "$@"
+# Sequential executor will use wait_all.sh internally for atomic operations
+"$PROJECT_ROOT/scripts/sequential-executor.sh" pre-commit "$@"
 EOF
                 fi
                 ;;
@@ -110,15 +110,15 @@ exit 0
 EOF
                 ;;
         esac
-        
+
         chmod +x "$hook_path"
     }
-    
+
     # Install all safety hooks
     for hook in pre-commit pre-push commit-msg; do
         create_hook "$hook"
     done
-    
+
     echo -e "${GREEN}✓ Git hooks updated with safety checks${NC}"
 fi
 
@@ -190,8 +190,7 @@ fi
 # 9. Summary
 echo -e "\n${GREEN}=== Sequential Execution Setup Summary ===${NC}"
 echo "1. Sequential executor: $SEQUENTIAL_EXECUTOR"
-echo "2. Safe wrapper: $SAFE_RUN"
-echo "3. Direct wrapper: seq (use as: ./scripts/seq <command>)"
+echo "2. Atomic executor: $WAIT_ALL"
 echo "4. Git hooks: Updated to use sequential execution"
 echo "5. Command aliases: source .sequential-aliases"
 echo ""

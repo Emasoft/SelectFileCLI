@@ -40,7 +40,7 @@ mkdir -p "$GIT_LOCK_DIR"
 check_existing_git_operations() {
     # Check for any running git processes
     local git_procs=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null || true)
-    
+
     if [ -n "$git_procs" ]; then
         echo -e "${RED}ERROR: Git operations already in progress:${NC}" >&2
         for pid in $git_procs; do
@@ -49,20 +49,20 @@ check_existing_git_operations() {
         done
         return 1
     fi
-    
+
     # Check for git lock files
     if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
         echo -e "${RED}ERROR: Git index lock exists - another git process may be running${NC}" >&2
         echo -e "${YELLOW}To force remove: rm -f $PROJECT_ROOT/.git/index.lock${NC}" >&2
         return 1
     fi
-    
+
     # Check for our own lock
     if [ -d "$GIT_LOCKFILE" ]; then
         if [ -f "$GIT_OPERATION_FILE" ]; then
             local current_op=$(cat "$GIT_OPERATION_FILE" 2>/dev/null || echo "unknown")
             local pid=$(echo "$current_op" | cut -d: -f1)
-            
+
             # Check if the process is still alive
             if kill -0 "$pid" 2>/dev/null; then
                 echo -e "${RED}ERROR: Git operation already in progress:${NC}" >&2
@@ -75,7 +75,7 @@ check_existing_git_operations() {
             fi
         fi
     fi
-    
+
     return 0
 }
 
@@ -83,21 +83,21 @@ check_existing_git_operations() {
 acquire_git_lock() {
     local max_wait=30  # Maximum 30 seconds wait
     local waited=0
-    
+
     while ! mkdir "$GIT_LOCKFILE" 2>/dev/null; do
         if [ "$waited" -ge "$max_wait" ]; then
             echo -e "${RED}ERROR: Could not acquire git lock after ${max_wait}s${NC}" >&2
             return 1
         fi
-        
+
         if [ "$waited" -eq 0 ]; then
             echo -e "${YELLOW}Waiting for git lock...${NC}" >&2
         fi
-        
+
         sleep 1
         waited=$((waited + 1))
     done
-    
+
     # Record current operation
     echo "$$:$(date '+%Y-%m-%d %H:%M:%S'):git $*" > "$GIT_OPERATION_FILE"
     return 0
@@ -138,10 +138,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SEQUENTIAL_EXECUTOR="${SCRIPT_DIR}/sequential-executor.sh"
 WAIT_ALL="${SCRIPT_DIR}/wait_all.sh"
 
-# Use sequential executor if available, otherwise direct git
-if [ -x "$SEQUENTIAL_EXECUTOR" ] && [ -x "$WAIT_ALL" ]; then
-    # Execute through sequential pipeline
-    "$WAIT_ALL" -- "$SEQUENTIAL_EXECUTOR" git "$@"
+# Use wait_all.sh for atomic execution
+if [ -x "$WAIT_ALL" ]; then
+    # Execute atomically through wait_all.sh
+    "$WAIT_ALL" -- git "$@"
 else
     # Direct execution (fallback)
     git "$@"

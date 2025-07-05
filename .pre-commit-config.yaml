@@ -42,18 +42,18 @@ repos:
   # Python formatting and linting (with require_serial: true)
   - repo: local
     hooks:
-      - id: ruff-format
-        name: Format with ruff
-        entry: uv run ruff format --line-length=320
+      - id: ruff-format-atomic
+        name: Format Python (atomic)
+        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 60 -- ruff format --line-length=320 "$f" || exit 1; done' --
         language: system
         types: [python]
         pass_filenames: true
         stages: [pre-commit]
         require_serial: true
 
-      - id: ruff-check
-        name: Lint with ruff
-        entry: uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --fix
+      - id: ruff-check-atomic
+        name: Lint Python (atomic)
+        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 60 -- ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --fix "$f" || exit 1; done' --
         language: system
         types: [python]
         pass_filenames: true

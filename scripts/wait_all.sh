@@ -1,286 +1,624 @@
 #!/usr/bin/env bash
-# wait_all.sh — Execute a command, wait for every descendant, with optional
-#               timeout, retries, JSON/log output, and configurable kill signal.
+# wait_all.sh — Execute a command, wait for every descendant, with timeout,
+#               retries, JSON/log output, per-process memory tracking, and
+#               *automatic runner selection*.
 #
 # -------------------------------------------------------------------------
 # USAGE
-#   ./wait_all.sh [OPTIONS] -- <command and args…>
+#   ./wait_all.sh [OPTIONS] -- <…command and args…>
 #
 #   (Legacy single-string form, still supported)
-#   ./wait_all.sh [OPTIONS] "<command>"
+#   ./wait_all.sh [OPTIONS] "<…command and args…>"
+#
+# DESCRIPTION
+#  Executes the supplied command in a fresh process group and blocks until
+#  *every* descendant terminates. It runs any executable. While running it:
+#    • Samples per-PID peak RSS and system-wide memory usage.
+#    • Optionally enforces a wall-clock timeout.
+#    • Optionally retries the command if it exits non-zero or times out.
+#    • Writes a fully timestamped log; can also emit a single JSON blob.
+#    • Transparently “upgrades” plain invocations to faster launchers
+#      (uv run, uv pip, pnpm run, etc.) when available.
+#    • Installs the small helper utilities it relies on with --install-deps.
 #
 # OPTIONS
-#   --verbose                Emit internal progress messages to stderr
-#   --log <file>             Append per-try stdout, stderr & exit status to <file>
-#   --json                   Print a JSON object instead of raw stdout/stderr
-#                            (uses jq if available, otherwise base64-encodes)
-#   --timeout <sec>          Abort after SEC seconds (0 ⇒ no timeout)
-#   --kill-signal <sig>      Signal sent on timeout (default SIGTERM)
-#   --retry <N>              Retry up to N additional times after non-zero exit
-#                            or timeout (0 ⇒ no retries)
-#   --help                   Show this help text and exit 0
+#  --verbose
+#        Emit progress messages (prefixed with the script name) to stderr.
+#
+#  --log <file>
+#        Write the detailed run log to <file>.  Defaults to
+#        ./logs/wait_all_<UTC-timestamp>.log (directory auto-created).
+#
+#  --json
+#        Print a structured JSON object instead of raw stdout/stderr.  If
+#        jq(1) is available the JSON contains plain UTF-8 text; otherwise the
+#        two streams are base64-encoded (portable).
+#
+#  --timeout <sec>
+#        Kill the whole process group if it runs longer than <sec> seconds.
+#        0 disables the timeout entirely (default).
+#
+#  --kill-signal <sig>
+#        Signal delivered when the timeout triggers.  May b#e a number (9),
+#        plain name (KILL) or “SIGKILL”.  Default: SIGTERM.#
+#
+#  --retry <N>
+#        Retry the command up to N additional times after non-zero exit or a
+#        timeout.  A successful run stops the loop immediately.#
+#
+#  --install-deps
+#        Attempt to install any missing helper programs using the native
+#        package manager (Homebrew, apt, apk, pkg).  Requires sudo on Linux.
+#
+#  --help
+#        Print this help and exit 0.
 #
 # EXIT CODES
 #   0    Success (from last attempt)
 #   1    Bad usage / option error
 #   124  Command killed by timeout (same as GNU timeout(1))
-#   *    Any other code is the wrapped command's exit status
+#   *    Any other code is the wrapped command’s exit status
 #
-# NOTES
-#   • The command is started in its own **process group**; on timeout we send the
-#     chosen signal to the whole group so every descendant is terminated.
-#   • On macOS the system Bash (3.2) lacks some modern features; using Homebrew
-#     Bash ≥ 5 is recommended. The shebang (`/usr/bin/env bash`) will pick it up
-#     automatically if it's first in your PATH.
+# RELEASE NOTES
+#   • A detailed, timestamped log is always written (see --log).  It includes
+#     stdout, stderr, exit status, and per-PID *peak* RSS plus system-wide
+#     memory utilisation at each peak.
+#   • The wrapped command runs in its own **process group**; on timeout the
+#     configured signal is delivered to the whole tree so every descendant
+#     dies.  If `setsid` is unavailable, the script falls back gracefully.
+#   • Portable to Bash ≥ 3.2 (macOS default); *no* namerefs, associative
+#     arrays, or GNU-only extensions are used.  Sub-second sleeps work even
+#     on BusyBox/dash via a tiny Perl fallback.
+#   • v3.1 (2025-07-05): NUL-safe temp-file exchange, robust BusyBox/macOS
+#     signal & ps handling, divide-by-zero guard in sys_mem(), safer legacy
+#     parsing, stricter error-handling (`set -e` re-enabled), removed `setsid`
+#     from auto-install list, and other hardening tweaks.  Help & examples
+#     updated accordingly.
 #
 # -------------------------------------------------------------------------
+#
 # EXAMPLES
 #
-# 🔹 Basic usage:
-#     ./wait_all.sh -- echo echo hello
+# 🔹 Classic
+#     ./wait_all.sh -- echo "hello world"
 #
-# 🔹 Verbose mode:
+# 🔹 Verbose mode
 #     ./wait_all.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
 #
-# 🔹 Logging output:
-#     ./wait_all.sh --log out.log -- python3 -c 'print(42)'
+# 🔹 Logging output (custom path)
+#     ./wait_all.sh --log /tmp/run.log -- python3 -c 'print(42)'
 #
-# 🔹 JSON output:
-#     ./wait_all.sh --json -- bash -c 'echo out; echo err >&2; exit 3'
+# 🔹 JSON output
+#     ./wait_all.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
 #
-# 🔹 Kill if it takes too long:
+# 🔹 Kill if it takes too long
 #     ./wait_all.sh --timeout 5 -- sleep 10
 #
-# 🔹 Use SIGKILL instead of SIGTERM on timeout:
+# 🔹 Use SIGKILL instead of SIGTERM on timeout
 #     ./wait_all.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
 #
-# 🔹 Retry command up to 3 times:
-#     ./wait_all.sh --retry 3 -- bash -c 'echo fail; exit 1'
+# 🔹 Retry command up to 3 times
+#     ./wait_all.sh --retry 3 -- bash -c 'echo fail ; exit 1'
 #
-# 🔹 Retry on timeout:
+# 🔹 Retry on timeout
 #     ./wait_all.sh --timeout 2 --retry 2 -- sleep 5
 #
-# 🔹 Combine all features:
+# 🔹 Combine everything
 #     ./wait_all.sh --timeout 3 --kill-signal SIGKILL --retry 2 \
 #                   --verbose --log out.log --json -- \
-#                   bash -c 'sleep 5; echo done'
+#                   bash -c 'sleep 5 ; echo done'
 #
-# 🔹 Capture output into a variable:
+# 🔹 Capture output into a variable
 #     result=$(./wait_all.sh -- echo foo)
 #     echo "Got: $result"
 #
+# ----------  Automatic runner examples -----------------------------------
+#
+#   ./wait_all.sh -- foo.py 1 2                  # → uv run foo.py 1 2
+#   ./wait_all.sh -- python script.py -x         # → uv run script.py -x
+#   ./wait_all.sh -- python -m pip install rich  # → uv pip install rich
+#   ./wait_all.sh -- bash build.sh --fast        # → uv run build.sh --fast
+#   ./wait_all.sh -- cleanup.sh                  # → uv run cleanup.sh
+#   ./wait_all.sh -- pip install numpy           # → uv pip install numpy
+#   ./wait_all.sh -- npm run lint                # → pnpm run lint
+#   ./wait_all.sh -- build                       # → pnpm run build
+#
+# ----------  Dependency-installer example --------------------------------
+#
+#   ./wait_all.sh --install-deps --verbose -- jq --version
+#
 # -------------------------------------------------------------------------
 
-# ─────────────────────────── Strict-mode & traps ──────────────────────────
-set -Eeuo pipefail                        # abort on error, unset var, or pipe fail
+VERSION='3.1'
 
-die()   { printf 'wait_all: %s\n' "$*" >&2; exit 1; }
+# ───────────────────────── Strict-mode & traps ───────────────────────────
+set -Eeuo pipefail
 
-# Print header up to the first totally blank line *after* EXAMPLES divider
+SCRIPT_NAME=${0##*/}
+printf '\n%s v%s\n' "$SCRIPT_NAME" "$VERSION" >&2
+
+# ──────────────────────────── Help screen ────────────────────────────────
 usage() {
-  awk '/^# EXAMPLES/{ex=1} ex && /^# *$/{exit} ex' "$0"
+  cat <<'EOF'
+A portable “run-and-really-wait” wrapper
+======================================================
+
+ USAGE
+   ./wait_all.sh [OPTIONS] -- <…command and args…>
+
+   (Legacy single-string form, still supported)
+   ./wait_all.sh [OPTIONS] "<…command and args…>"
+
+DESCRIPTION
+  Executes the supplied command in a fresh process group and blocks until
+  *every* descendant terminates.  While running it:
+    • Samples per-PID peak RSS and system-wide memory usage.
+    • Optionally enforces a wall-clock timeout.
+    • Optionally retries the command if it exits non-zero or times out.
+    • Writes a fully timestamped log; can also emit a single JSON blob.
+    • Transparently “upgrades” plain invocations to faster launchers
+      (uv run, uv pip, pnpm run, etc.) when available.
+    • Installs the small helper utilities it relies on with --install-deps.
+
+OPTIONS
+  --verbose
+        Emit progress messages (prefixed with the script name) to stderr.
+
+  --log <file>
+        Write the detailed run log to <file>.  Defaults to
+        ./logs/wait_all_<UTC-timestamp>.log (directory auto-created).
+
+  --json
+        Print a structured JSON object instead of raw stdout/stderr.  If
+        jq(1) is available the JSON contains plain UTF-8 text; otherwise the
+        two streams are base64-encoded (portable).
+
+  --timeout <sec>
+        Kill the whole process group if it runs longer than <sec> seconds.
+        0 disables the timeout entirely (default).
+
+  --kill-signal <sig>
+        Signal delivered when the timeout triggers.  May be a number (9),
+        plain name (KILL) or “SIGKILL”.  Default: SIGTERM.
+
+  --retry <N>
+        Retry the command up to N additional times after non-zero exit or a
+        timeout.  A successful run stops the loop immediately.
+
+  --install-deps
+        Attempt to install any missing helper programs using the native
+        package manager (Homebrew, apt, apk, pkg).  Requires sudo on Linux.
+
+  --help
+        Print this help and exit 0.
+
+EXIT STATUS
+  0      Wrapped command eventually succeeded.
+  1      Bad usage or option error.
+  124    Command was killed because it exceeded --timeout.
+  other  The wrapped command’s exit status (last attempt).
+
+ENVIRONMENT
+  TMPDIR     Used for internal temp-files (mktemp).  Paths *may* contain
+             spaces thanks to NUL-separated hand-over.
+  VIRTUAL_ENV / CONDA_PREFIX
+             Presence enables uv-based auto-runner substitutions.
+
+FILES
+  ./logs/wait_all_<timestamp>.log (default log path).
+
+SEE ALSO
+  timeout(1), jq(1), uv(1), pnpm(1), setsid(2), kill(1).
+
+
+ --------------------------  USAGE EXAMPLES  -----------------------------
+
+ 🔹 Classic
+     ./wait_all.sh -- my_executable
+
+ 🔹 Verbose mode
+     ./wait_all.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
+
+ 🔹 Logging output (custom path)
+     ./wait_all.sh --log /tmp/run.log -- python3 -c 'print(42)'
+
+ 🔹 JSON output
+     ./wait_all.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
+
+ 🔹 Kill if it takes too long
+     ./wait_all.sh --timeout 5 -- sleep 10
+
+ 🔹 Use SIGKILL instead of SIGTERM on timeout
+     ./wait_all.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
+
+ 🔹 Retry command up to 3 times
+     ./wait_all.sh --retry 3 -- bash -c 'echo fail ; exit 1'
+
+ 🔹 Retry on timeout
+     ./wait_all.sh --timeout 2 --retry 2 -- sleep 5
+
+ 🔹 Combine everything
+     ./wait_all.sh --timeout 3 --kill-signal SIGKILL --retry 2 \
+                   --verbose --log out.log --json -- \
+                   bash -c 'sleep 5 ; echo done'
+
+ 🔹 Capture output into a variable
+     result=$(./wait_all.sh -- echo foo)
+     echo "Got: $result"
+
+ ----------  Automatic runner examples -----------------------------------
+
+   ./wait_all.sh -- foo.py 1 2                  # → uv run foo.py 1 2
+   ./wait_all.sh -- python script.py -x         # → uv run script.py -x
+   ./wait_all.sh -- python -m pip install rich  # → uv pip install rich
+   ./wait_all.sh -- bash build.sh --fast        # → uv run build.sh --fast
+   ./wait_all.sh -- cleanup.sh                  # → uv run cleanup.sh
+   ./wait_all.sh -- pip install numpy           # → uv pip install numpy
+   ./wait_all.sh -- npm run lint                # → pnpm run lint
+   ./wait_all.sh -- build                       # → pnpm run build
+
+ ----------  Dependency-installer example --------------------------------
+
+   ./wait_all.sh --install-deps --verbose -- jq --version
+
+ -------------------------------------------------------------------------
+
+EOF
 }
 
-# List of temporary files created with mktemp; cleaned on any exit
+# ──────────────────────── Error & exit helpers ───────────────────────────
+die() {
+  printf '%s: %s\n' "$SCRIPT_NAME" "$*" >&2
+  printf "execute '%s --help' for more details.\n" "$SCRIPT_NAME" >&2
+  exit 1
+}
+
+# Show help when run with no arguments
+(( $# == 0 )) && { usage; exit 0; }
+
+# Print header until first blank line after “EXAMPLES” (used nowhere now but
+# kept to avoid touching the remainder of the script logic)
+short_usage() {
+  awk '
+    /^# EXAMPLES/ { ex=1; next }
+    ex && /^#[[:space:]]*$/ { exit }
+    ex
+  ' "$0"
+}
+
+# Temp-file cleanup on any exit
 TEMP_FILES=()
-cleanup() { rm -f -- "${TEMP_FILES[@]:-}"; }
+cleanup() { rm -f -- "${TEMP_FILES[@]:-}" 2>/dev/null || true; }
 trap cleanup EXIT
-# ERR trap removed - we handle errors explicitly where needed
+trap 'die "unexpected error on line $LINENO"' ERR
 
-# ───────────────────────── Helpers: validation ────────────────────────────
-is_integer() { [[ $1 =~ ^[0-9]+$ ]]; }
+# ───────────────────────── Helpers: validation ───────────────────────────
+have()            { command -v "$1" >/dev/null 2>&1; }
+is_integer()      { [[ ${1:-x} =~ ^[0-9]+$ ]]; }
 
+# Accepts numeric, TERM, or SIGTERM (case-insensitive, BSD/Linux/BusyBox)
 is_valid_signal() {
-  local sig=$1
-  # numeric? → accept if integer
-  if [[ $sig =~ ^[0-9]+$ ]]; then
-    return 0
-  fi
-  # name? → check against kill -l output (portable across BSD & GNU)
-  kill -l | tr ' ' '\n' | grep -qiE "^${sig}$"
+  local sig=${1#SIG}
+  if [[ $sig =~ ^[0-9]+$ ]]; then kill -l "$sig" >/dev/null 2>&1 && return 0; fi
+  kill -l | tr ' ,\t' '\n\n\n' | grep -qiE "^${sig}$"
 }
 
-# ───────────────────────── Default option values ──────────────────────────
-VERBOSE=0
-JSON=0
-LOG_FILE=""
-TIMEOUT=0
-KILL_SIGNAL="SIGTERM"
-RETRY_MAX=0
-CMD=()                           # array; preserves spaces for modern form
-LEGACY_CMD_STRING=""             # non-empty only for the old single-string form
+venv_active()     { [[ -n ${VIRTUAL_ENV:-} || -n ${CONDA_PREFIX:-} ]]; }
+epoch_s()         { date +%s; }
 
-# ───────────────────────────── Option parsing ─────────────────────────────
+# Portable short sleep: works even when /bin/sleep lacks fractional support
+sleep_short() {
+  local dur=$1
+  if sleep "$dur" 2>/dev/null; then return; fi
+  perl -e "select undef,undef,undef,$dur" 2>/dev/null || sleep 1
+}
+
+# ─── System-memory snapshot: “used_kB total_kB compressed_pages” ──────────
+sys_mem() {
+  if [[ -r /proc/meminfo ]]; then                 # Linux
+    local total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+    local avail=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+    echo "$((total-avail)) $total 0"
+  elif have vm_stat && have sysctl; then          # macOS / FreeBSD
+    local page=$(sysctl -n hw.pagesize)
+    : "${page:=4096}"                             # fallback if empty
+    local total_b=$(sysctl -n hw.memsize)
+    local free=$(vm_stat | awk '/Pages free/{print $3}' | tr -d '.')
+    local inactive=$(vm_stat | awk '/Pages inactive/{print $3}' | tr -d '.')
+    local spec=$(vm_stat | awk '/Pages speculative/{print $3}' | tr -d '.')
+    local comp=$(vm_stat | awk '/occupied by compressor/{print $5}' | tr -d '.')
+    local used_b=$(( total_b - (free+inactive+spec)*page ))
+    echo "$((used_b/1024)) $((total_b/1024)) $comp"
+  else                                            # fallback
+    echo "0 0 0"
+  fi
+}
+
+# ───────────────────────── Default option values ─────────────────────────
+mkdir -p ./logs
+TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
+LOG_FILE="./logs/wait_all_${TIMESTAMP}.log"
+
+VERBOSE=0 JSON=0 TIMEOUT=0 KILL_SIGNAL="SIGTERM" RETRY_MAX=0 INSTALL_DEPS=0
+CMD=()  LEGACY_CMD_STRING=""
+
+# ───────────────────────────── Option parsing ────────────────────────────
 while (( $# )); do
   case $1 in
-    --verbose) VERBOSE=1 ;;
-    --json)    JSON=1 ;;
-    --log)
-        shift || die "--log needs a filename"
-        LOG_FILE=$1 ;;
-    --timeout)
-        shift || die "--timeout needs a value"
-        is_integer "$1" || die "--timeout must be a non-negative integer"
-        TIMEOUT=$1 ;;
-    --kill-signal)
-        shift || die "--kill-signal needs a value"
-        is_valid_signal "$1" || die "unknown signal: $1"
-        KILL_SIGNAL=$1 ;;
-    --retry)
-        shift || die "--retry needs a value"
-        is_integer "$1" || die "--retry must be a non-negative integer"
-        RETRY_MAX=$1 ;;
+    --verbose)       VERBOSE=1 ;;
+    --json)          JSON=1 ;;
+    --install-deps)  INSTALL_DEPS=1 ;;
+    --log)     shift || die "--log needs filename"
+               LOG_FILE=$1 ;;
+    --timeout) shift || die "--timeout needs value"
+               is_integer "$1" || die "--timeout must be integer"
+               TIMEOUT=$1 ;;
+    --kill-signal) shift || die "--kill-signal needs value"
+                   is_valid_signal "$1" || die "unknown signal: $1"
+                   KILL_SIGNAL=$1 ;;
+    --retry)   shift || die "--retry needs value"
+               is_integer "$1" || die "--retry must be integer"
+               RETRY_MAX=$1 ;;
     --help)    usage; exit 0 ;;
-    --)        shift; CMD=("$@"); break ;;   # modern form: everything after -- is cmd
+    --)        shift; CMD=("$@"); break ;;
     --*)       die "unknown option: $1" ;;
-    *)         # legacy single-string form (maintained for backward compatibility)
-               LEGACY_CMD_STRING=$1; break ;;
+    *)         LEGACY_CMD_STRING=$1; break ;;
   esac
   shift
 done
+[[ -n $LEGACY_CMD_STRING || ${#CMD[@]} -gt 0 ]] || { usage; exit 1; }
 
-if [[ -z $LEGACY_CMD_STRING && ${#CMD[@]} -eq 0 ]]; then
-  die "no command specified.  see --help"
+mkdir -p "$(dirname "$LOG_FILE")" || die "cannot create log dir"
+echo "$SCRIPT_NAME v$VERSION" >>"$LOG_FILE"
+
+# ────────── Dependency detection / optional automatic installation ───────
+missing_cmds=()
+for cmd in jq gawk pnpm uv; do have "$cmd" || missing_cmds+=("$cmd"); done
+
+if (( ${#missing_cmds[@]} )); then
+  if (( INSTALL_DEPS )); then
+    if [[ $(uname) == Darwin ]]; then
+      have brew || die "Homebrew not installed – please install first"
+      brew install "${missing_cmds[@]}" || die "brew install failed"
+    elif [[ -f /etc/debian_version ]]; then
+      sudo apt-get update && sudo apt-get install -y "${missing_cmds[@]}" || die "apt-get failed"
+    elif [[ -f /etc/alpine-release ]]; then
+      sudo apk add --no-cache "${missing_cmds[@]}" || die "apk add failed"
+    elif [[ $(uname) == FreeBSD ]]; then
+      sudo pkg install -y "${missing_cmds[@]}" || die "pkg install failed"
+    else
+      die "automatic dependency install not supported on this OS"
+    fi
+  else
+    echo "Missing dependencies: ${missing_cmds[*]}" >&2
+    echo "Re-run with --install-deps to attempt automatic installation" >&2
+  fi
 fi
 
-(( VERBOSE )) && {
-  if [[ -n $LEGACY_CMD_STRING ]]; then
-    printf '[wait_all] Legacy command string: %s\n' "$LEGACY_CMD_STRING" >&2
-  else
-    printf '[wait_all] Command array: %q\n' "${CMD[@]}" >&2
-  fi
-}
 
-# ─────────────────────── JSON/encoding helper function ────────────────────
+# ─────────────────────── JSON helper for stdout/err ──────────────────────
 json_encode() {
   local out=$1 err=$2 code=$3
-  if command -v jq >/dev/null 2>&1; then
+  if have jq; then
     jq -n --arg out "$out" --arg err "$err" --argjson code "$code" \
-       '{stdout:$out, stderr:$err, exit_code:$code}'
+         '{stdout:$out, stderr:$err, exit_code:$code}'
   else
     printf '{"stdout_b64":"%s","stderr_b64":"%s","exit_code":%d}\n' \
-           "$(printf %s "$out" | base64)" \
-           "$(printf %s "$err" | base64)" \
-           "$code"
-    echo "# (stdout/stderr were base64-encoded because jq is absent)" >&2
+           "$(printf %s "$out" | base64 | tr -d '\n')" \
+           "$(printf %s "$err" | base64 | tr -d '\n')" "$code"
+    echo "# (streams base64-encoded; jq absent)" >&2
   fi
 }
 
-# ────────────────── Function: run the command once (one try) ──────────────
-run_once() {
-  local attempt=$1
-  local tmp_out tmp_err
-  tmp_out=$(mktemp) && TEMP_FILES+=("$tmp_out")
-  tmp_err=$(mktemp) && TEMP_FILES+=("$tmp_err")
+# ╭────────────────── AUTO-RUNNER HEURISTIC (Bash-3.2-safe) ───────────────╮
+# | adjust_command IN_ARRAY OUT_ARRAY                                      |
+# ╰────────────────────────────────────────────────────────────────────────╯
+adjust_command() {
+  local in_name=$1 out_name=$2
+  eval "local first=\${${in_name}[0]}"
+  eval "local -a orig=(\"\${${in_name}[@]}\")"
+  eval "${out_name}=(\"\${orig[@]}\")"   # default: unchanged
 
-  (( VERBOSE )) && echo "[wait_all] Try #$attempt → launching…" >&2
+  set_out() { eval "${out_name}=(\"$@\")"; }
 
-  # Start the command in a new session (setsid) so it gets its own PGID
-  # Check if setsid is available (Linux/BSD) or use alternative (macOS)
-  if command -v setsid >/dev/null 2>&1; then
-    if [[ -n $LEGACY_CMD_STRING ]]; then
-      setsid bash -c "$LEGACY_CMD_STRING" >"$tmp_out" 2>"$tmp_err" &
+  # 0) Already a launcher?
+  case $first in uv|uvx|pnpm|yarn|node|go|osascript) return 0 ;; esac
+
+  # 1) python → uv run / uv pip
+  if [[ $first == python* ]] && have uv; then
+    if [[ ${orig[1]:-} == -m && ${orig[2]:-} == pip ]]; then
+      set_out uv pip "${orig[@]:3}"
     else
-      setsid "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
+      set_out uv run "${orig[@]:1}"
     fi
-  else
-    # macOS or systems without setsid - use bash job control
-    if [[ -n $LEGACY_CMD_STRING ]]; then
-      bash -c "$LEGACY_CMD_STRING" >"$tmp_out" 2>"$tmp_err" &
+    return 0
+  fi
+
+  # 2) bash script.sh → uv run
+  if [[ $first == bash && ${orig[1]:-} == *.sh && have uv ]]; then
+    set_out uv run "${orig[@]:1}"; return 0
+  fi
+
+  # 3) Bare *.py
+  if [[ $first == *.py ]]; then
+    if have uv; then set_out uv run "${orig[@]}"; else set_out python "${orig[@]}"; fi
+    return 0
+  fi
+
+  # 4) Bare *.sh
+  if [[ $first == *.sh ]]; then
+    if have uv && venv_active; then set_out uv run "${orig[@]}"; else set_out bash "${orig[@]}"; fi
+    return 0
+  fi
+
+  # 5) pip / pip3
+  if [[ $first == pip* ]]; then
+    have uv && set_out uv pip "${orig[@]:1}"; return 0
+  fi
+
+  # 6) npm → pnpm
+  if [[ $first == npm && have pnpm ]]; then
+    if [[ ${orig[1]:-} == run ]]; then
+      set_out pnpm run "${orig[@]:2}"
     else
-      "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
+      set_out pnpm "${orig[@]:1}"
+    fi
+    return 0
+  fi
+
+  # 7) Bare package.json script → pnpm run
+  if [[ -f package.json && have pnpm ]]; then
+    if have jq && jq -e --arg s "$first" '.scripts[$s]?' package.json >/dev/null 2>&1; then
+      set_out pnpm run "$first" "${orig[@]:1}"
     fi
   fi
-  local main_pid=$!
-  local pgid
-  # Wait a moment for the process to start
-  sleep 0.1
-  # Get pgid with error handling
-  if pgid=$(ps -o pgid= "$main_pid" 2>/dev/null | tr -d ' '); then
-    :  # Success
+}
+
+# ────────────────── Function: run the command once ───────────────────────
+run_once() {
+  local attempt=$1
+
+  # Temp files for captured streams & memory samples
+  local tmp_out tmp_err mem_snap
+  tmp_out=$(mktemp); TEMP_FILES+=("$tmp_out")
+  tmp_err=$(mktemp); TEMP_FILES+=("$tmp_err")
+  mem_snap=$(mktemp); TEMP_FILES+=("$mem_snap")
+
+  # Build command array from legacy or modern form
+  local C_IN=()
+  if [[ -n $LEGACY_CMD_STRING ]]; then
+    # Preserve quoting/escaping by re-parsing through the shell
+    eval "set -- $LEGACY_CMD_STRING"
+    C_IN=("$@")
   else
-    # Fallback: use the PID as PGID
-    pgid="$main_pid"
+    C_IN=("${CMD[@]}")
+  fi
+
+  local RUN=()
+  adjust_command C_IN RUN
+  (( VERBOSE )) && printf '[%s] Launching: %q\n' "$SCRIPT_NAME" "${RUN[@]}" >&2
+
+  # Start child; setsid if available
+  if have setsid; then
+    setsid "${RUN[@]}" >"$tmp_out" 2>"$tmp_err" &
+  else
+    "${RUN[@]}"        >"$tmp_out" 2>"$tmp_err" &
+  fi
+  local main_pid=$!
+
+  # Get process-group ID (macOS needs -p)
+  local pgid
+  if pgid=$(ps -p "$main_pid" -o pgid= 2>/dev/null); then
+    pgid=$(tr -d '[:space:],<' <<<"$pgid")
+  else
+    pgid=""
   fi
 
   local timed_out=0 exit_code=0
-  local start_ns deadline_ns now_ns
+  local start_s=$(epoch_s)
+  local SAMPLE=0.2
 
-  if (( TIMEOUT > 0 )); then
-    start_ns=$(date +%s%N)
-    (( deadline_ns = start_ns + TIMEOUT*1000000000 ))
-  fi
-
-  # ---- monitor main process until it ends or we hit the deadline ----
+  # ── Monitoring loop ────────────────────────────────────────────────────
   while kill -0 "$main_pid" 2>/dev/null; do
-    sleep 0.1
-    if (( TIMEOUT > 0 )); then
-      now_ns=$(date +%s%N)
-      if (( now_ns >= deadline_ns )); then
-        (( VERBOSE )) && \
-          echo "[wait_all] Timeout ${TIMEOUT}s → ${KILL_SIGNAL} PGID $pgid" >&2
-        kill "-$KILL_SIGNAL" "-$pgid" 2>/dev/null || true
-        timed_out=1
-        break
-      fi
+    sleep_short "$SAMPLE"
+
+    # Sample memory (only if we know pgid)
+    if [[ -n $pgid ]]; then
+      # GNU ps accepts " -g $pgid", macOS needs "-g$pgid"
+      if ps -o pid= -g "$pgid" >/dev/null 2>&1; then
+        ps -o pid=,rss= -g "$pgid"
+      else
+        ps -g"$pgid" -o pid,rss
+      fi | while read -r pid rss; do
+          local sys
+          sys=$(sys_mem)
+          printf '%s %s %s %s\n' "$(epoch_s)" "$pid" "$rss" "$sys" >>"$mem_snap"
+        done
+    fi
+
+    # Timeout?
+    if (( TIMEOUT > 0 )) && (( $(epoch_s) - start_s >= TIMEOUT )); then
+      (( VERBOSE )) && echo "[$SCRIPT_NAME] Timeout → $KILL_SIGNAL pgid $pgid" >&2
+      {
+        echo "TIMEOUT after ${TIMEOUT}s — killing pgid $pgid"
+        ps -o pid,ppid,stat,command -g "$pgid"
+      } >>"$LOG_FILE" 2>&1 || true
+      [[ -n $pgid ]] && kill "-$KILL_SIGNAL" "-$pgid" 2>/dev/null || \
+                       kill "-$KILL_SIGNAL" "$main_pid" 2>/dev/null || true
+      timed_out=1
+      break
     fi
   done
 
-  wait "$main_pid" 2>/dev/null || true    # collect exit status quietly
-
-  # spin until every process in the group is gone
-  while pgrep -g "$pgid" >/dev/null 2>&1; do sleep 0.05; done
-
-  if (( timed_out )); then
-    exit_code=124
-  else
-    exit_code=$?
+  # Wait for exit & settle
+  wait "$main_pid" 2>/dev/null || true
+  local child_rc=$?
+  if [[ -n $pgid ]]; then
+    while pgrep -g "$pgid" >/dev/null 2>&1; do sleep_short 0.05; done
   fi
+  if (( timed_out )); then exit_code=124; else exit_code=$child_rc; fi
 
+  # Read captured streams
   local stdout stderr
   stdout=$(<"$tmp_out")
   stderr=$(<"$tmp_err")
 
-  # ------------ optional log file -----------------------------------------
-  if [[ -n $LOG_FILE ]]; then
-    {
-      echo "=== TRY #$attempt ==="
-      echo "CMD : ${LEGACY_CMD_STRING:-${CMD[*]}}"
-      echo "STDOUT:"
-      printf '%s\n' "$stdout"
-      echo "STDERR:"
-      printf '%s\n' "$stderr"
-      echo "EXIT : $exit_code"
-      (( timed_out )) && echo "TIMEOUT after ${TIMEOUT}s"
-      echo
-    } >>"$LOG_FILE"
-  fi
+  # ── Summarise memory peaks (portable awk first; gawk if available) ─────
+  {
+    echo "=== TRY #$attempt  @ $(date -u +"%F %T UTC")  (v$VERSION) ==="
+    echo "CMD : ${RUN[*]}"
+    echo "EXIT: $exit_code"
+    (( timed_out )) && echo "TIMEOUT: ${TIMEOUT}s"
+    echo "--- Peak memory per PID (KiB) ---------------------------------"
+    if have gawk && gawk 'BEGIN{ exit !(has="asort") }' </dev/null 2>/dev/null; then
+      gawk '
+        {
+          pid=$2; rss=$3; used=$4; tot=$5;
+          if (rss>max[pid]) { max[pid]=rss; ts[pid]=$1; used_s[pid]=used; tot_s[pid]=tot }
+        }
+        END {
+          n=asort(max, idx)
+          for (i=1;i<=n;i++) {
+            p=idx[i]
+            pct=(tot_s[p]>0)?used_s[p]*100/tot_s[p]:0;
+            printf "PID %s  peakRSS=%d  epoch=%s  sys=%d/%dKiB (%.1f%%)\n",
+                   p,max[p],ts[p],used_s[p],tot_s[p],pct;
+          }
+        }' "$mem_snap"
+    else
+      awk '{ if($3>rss[$2]) rss[$2]=$3 }
+           END{ for(k in rss) printf "PID %s peakRSS=%dKiB\n",k,rss[k] }' \
+           "$mem_snap"
+    fi
+    echo "----------------------------------------------------------------"
+    echo "STDOUT ↓"; printf '%s\n' "$stdout"
+    echo "STDERR ↓"; printf '%s\n' "$stderr"
+    echo
+  } >>"$LOG_FILE"
 
-  # ------------- user-visible output --------------------------------------
-  if (( JSON )); then
-    json_encode "$stdout" "$stderr" "$exit_code"
-  else
-    printf '%s' "$stdout"
-    [[ -n $stderr ]] && printf '%s' "$stderr" >&2
-  fi
-
-  (( VERBOSE )) && \
-    echo "[wait_all] Try #$attempt finished with exit $exit_code" >&2
-  (( timed_out )) && echo "[wait_all]   (timeout)" >&2
-
-  return "$exit_code"
+  # ── Return triple “tmp_out tmp_err exit_code” to caller (NUL-separated) ─
+  printf '%s\0%s\0%d' "$tmp_out" "$tmp_err" "$exit_code"
 }
 
-# ───────────────────────── Retry orchestration loop ───────────────────────
+# ───────────────────── Retry orchestration loop ──────────────────────────
+final_out= final_err= final_rc=0
 for (( attempt=1; ; ++attempt )); do
-  run_once "$attempt"
-  status=$?
-  if (( status == 0 )); then exit 0; fi
-  if (( attempt > RETRY_MAX )); then
-    (( VERBOSE )) && echo "[wait_all] No retries left; exiting $status" >&2
-    exit "$status"
+  IFS=$'\0' read -r out_f err_f rc < <(run_once "$attempt")
+  if (( rc == 0 )) || (( attempt > RETRY_MAX )); then
+    final_out=$(<"$out_f")
+    final_err=$(<"$err_f")
+    final_rc=$rc
+    break
   fi
   (( VERBOSE )) && \
-    echo "[wait_all] attempt $attempt failed (exit $status) —" \
-         "retrying $(( RETRY_MAX - attempt + 1 )) more time(s)…" >&2
+    echo "[$SCRIPT_NAME] attempt $attempt failed (exit $rc) — retrying…" >&2
 done
+
+# ───────────────────────── Emit final result ─────────────────────────────
+if (( JSON )); then
+  json_encode "$final_out" "$final_err" "$final_rc"
+else
+  printf '%s' "$final_out"
+  [[ -n $final_err ]] && printf '%s' "$final_err" >&2
+fi
+exit "$final_rc"

@@ -22,6 +22,6 @@ if [[ "${BASH_SOURCE[1]:-}" == *"pre-commit"* ]] || [[ "${0}" == *"pre-commit"* 
     exec "$@"
 fi
 
-# Otherwise, use sequential executor
+# Otherwise, use sequential executor for serialization
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-exec "${SCRIPT_DIR}/safe-run.sh" "$@"
+exec "${SCRIPT_DIR}/sequential-executor.sh" "$@"

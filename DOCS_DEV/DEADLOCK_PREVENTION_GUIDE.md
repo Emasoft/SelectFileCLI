@@ -61,7 +61,7 @@ All pre-commit hooks now use `pre-commit-safe.sh` wrapper for consistent behavio
 
 2. **Periodic Checks**: Every 10 seconds, waiting processes check for circular dependencies
 
-3. **Detection Algorithm**: 
+3. **Detection Algorithm**:
    ```
    check_deadlock(start_pid, current_pid):
        waiting_for = get_who_current_pid_waits_for()

@@ -12,8 +12,8 @@ YELLOW := \033[1;33m
 RED := \033[0;31m
 NC := \033[0m # No Color
 
-# Safe run wrapper - ensures sequential execution
-SAFE_RUN := ./scripts/safe-run.sh
+# Atomic execution wrapper - ensures complete process cleanup
+WAIT_ALL := ./scripts/wait_all.sh
 # Make sequential wrapper - prevents concurrent make commands
 MAKE_SEQ := ./scripts/make-sequential.sh
 
@@ -48,17 +48,17 @@ dev-setup: ## Set up development environment
 
 install: ## Install dependencies safely
 	@echo -e "$(GREEN)Installing dependencies...$(NC)"
-	@$(SAFE_RUN) uv sync --all-extras
+	@$(WAIT_ALL) -- uv sync --all-extras
 
 test: check-env ## Run tests safely (sequential)
 	@echo -e "$(GREEN)Running tests sequentially...$(NC)"
 	@source .env.development 2>/dev/null || true
-	@$(SAFE_RUN) uv run pytest -v
+	@$(WAIT_ALL) -- uv run pytest -v
 
 test-fast: check-env ## Run fast tests only
 	@echo -e "$(GREEN)Running fast tests...$(NC)"
 	@source .env.development 2>/dev/null || true
-	@$(SAFE_RUN) uv run pytest -v -m "not slow"
+	@$(WAIT_ALL) -- uv run pytest -v -m "not slow"
 
 test-file: check-env ## Run specific test file (usage: make test-file FILE=tests/test_foo.py)
 	@if [ -z "$(FILE)" ]; then \
@@ -67,19 +67,19 @@ test-file: check-env ## Run specific test file (usage: make test-file FILE=tests
 	fi
 	@echo -e "$(GREEN)Running test: $(FILE)$(NC)"
 	@source .env.development 2>/dev/null || true
-	@$(SAFE_RUN) uv run pytest -v $(FILE)
+	@$(WAIT_ALL) -- uv run pytest -v $(FILE)
 
 lint: check-env ## Run linters safely
 	@echo -e "$(GREEN)Running linters...$(NC)"
 	@source .env.development 2>/dev/null || true
-	@$(SAFE_RUN) uv run ruff check src tests
-	@$(SAFE_RUN) uv run mypy src --strict
+	@$(WAIT_ALL) -- uv run ruff check src tests
+	@$(WAIT_ALL) -- uv run mypy src --strict
 
 format: check-env ## Format code safely
 	@echo -e "$(GREEN)Formatting code...$(NC)"
 	@source .env.development 2>/dev/null || true
-	@$(SAFE_RUN) uv run ruff format src tests
-	@$(SAFE_RUN) uv run ruff check --fix src tests
+	@$(WAIT_ALL) -- uv run ruff format src tests
+	@$(WAIT_ALL) -- uv run ruff check --fix src tests
 
 check: lint test ## Run all checks
 
@@ -156,8 +156,8 @@ git-pull: ## Safely pull from remote
 
 # Hidden targets for CI
 .ci-test:
-	@$(SAFE_RUN) uv run pytest --cov=src --cov-report=xml
+	@$(WAIT_ALL) -- uv run pytest --cov=src --cov-report=xml
 
 .ci-lint:
-	@$(SAFE_RUN) uv run ruff check src tests --format=github
-	@$(SAFE_RUN) uv run mypy src --no-error-summary
+	@$(WAIT_ALL) -- uv run ruff check src tests --format=github
+	@$(WAIT_ALL) -- uv run mypy src --no-error-summary

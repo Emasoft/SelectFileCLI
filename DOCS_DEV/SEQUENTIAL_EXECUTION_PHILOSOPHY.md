@@ -15,6 +15,8 @@
 ### 3. Atomic Operations
 - **Git commits are atomic** - The entire git commit (including pre-commit hooks) is one operation
 - **No nested locking** - Operations that are part of a larger operation don't get separate locks
+- **Smallest unit of work** - Each wait_all.sh command processes the minimal possible workload
+- **File-level granularity** - Process files individually, not in batches
 
 ## Implementation
 

@@ -6,6 +6,21 @@
 # 2. Only ONE process runs at a time - no exceptions
 # 3. Pipeline timeout applies to the entire execution chain
 # 4. If pipeline times out, ALL processes are killed
+# 5. Commands should be ATOMIC - smallest possible units of work
+#
+# CRITICAL: This executor works with wait_all.sh to form a sequential chain.
+# Each wait_all.sh command should be atomic to minimize memory usage and
+# enable precise failure isolation.
+#
+# Example of ATOMIC commands (GOOD):
+#   sequential-executor.sh ruff format src/main.py
+#   sequential-executor.sh pytest tests/test_one.py
+#   sequential-executor.sh mypy --strict src/module.py
+#
+# Example of NON-ATOMIC commands (BAD):
+#   sequential-executor.sh ruff format .
+#   sequential-executor.sh pytest
+#   sequential-executor.sh mypy --strict src/
 #
 set -euo pipefail
 
@@ -74,20 +89,20 @@ get_descendants() {
 kill_process_tree() {
     local pid=$1
     local signal=${2:-TERM}
-    
+
     # Get all descendants first
     local all_pids="$pid $(get_descendants "$pid")"
-    
+
     # Send signal to all
     for p in $all_pids; do
         if kill -0 "$p" 2>/dev/null; then
             kill -$signal "$p" 2>/dev/null || true
         fi
     done
-    
+
     # Give time to terminate gracefully
     sleep 2
-    
+
     # Force kill any remaining
     for p in $all_pids; do
         if kill -0 "$p" 2>/dev/null; then
@@ -102,13 +117,13 @@ check_pipeline_timeout() {
         # First process in pipeline - set timeout
         echo "$(date +%s):$PIPELINE_TIMEOUT" > "$PIPELINE_TIMEOUT_FILE"
         log INFO "Pipeline timeout set to ${PIPELINE_TIMEOUT}s"
-        
+
         # Start timeout monitor in background
         (
             sleep $PIPELINE_TIMEOUT
             if [ -f "$PIPELINE_TIMEOUT_FILE" ]; then
                 log ERROR "PIPELINE TIMEOUT after ${PIPELINE_TIMEOUT}s - killing all processes"
-                
+
                 # Kill all processes in queue
                 if [ -f "$QUEUE_FILE" ]; then
                     while IFS=: read -r pid ts cmd; do
@@ -118,7 +133,7 @@ check_pipeline_timeout() {
                         fi
                     done < "$QUEUE_FILE"
                 fi
-                
+
                 # Kill current process
                 if [ -f "$CURRENT_PID_FILE" ]; then
                     current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
@@ -127,7 +142,7 @@ check_pipeline_timeout() {
                         kill_process_tree "$current"
                     fi
                 fi
-                
+
                 # Clean up all locks
                 rm -rf "$LOCK_DIR"
             fi
@@ -139,12 +154,12 @@ check_pipeline_timeout() {
         local timeout=$(echo "$timeout_info" | cut -d: -f2)
         local now=$(date +%s)
         local elapsed=$((now - start_time))
-        
+
         if [ $elapsed -gt $timeout ]; then
             log ERROR "Pipeline already timed out (${elapsed}s > ${timeout}s)"
             exit 126  # Pipeline timeout exit code
         fi
-        
+
         log INFO "Pipeline time remaining: $((timeout - elapsed))s"
     fi
 }
@@ -152,18 +167,18 @@ check_pipeline_timeout() {
 # Cleanup function
 cleanup() {
     local exit_code=$?
-    
+
     # Stop memory monitor if running
     if [ -n "${MONITOR_PID:-}" ]; then
         kill $MONITOR_PID 2>/dev/null || true
     fi
-    
+
     # Remove from queue
     if [ -f "$QUEUE_FILE" ]; then
         grep -v "^$$:" "$QUEUE_FILE" > "${QUEUE_FILE}.tmp" 2>/dev/null || true
         mv -f "${QUEUE_FILE}.tmp" "$QUEUE_FILE" 2>/dev/null || true
     fi
-    
+
     # Release lock if we hold it
     if [ -f "$CURRENT_PID_FILE" ]; then
         local current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
@@ -171,7 +186,7 @@ cleanup() {
             rm -f "$CURRENT_PID_FILE"
             rmdir "$LOCKFILE" 2>/dev/null || true
             log INFO "Lock released"
-            
+
             # If queue is empty, pipeline is complete
             if [ ! -s "$QUEUE_FILE" ]; then
                 log INFO "Queue empty - pipeline complete"
@@ -179,10 +194,10 @@ cleanup() {
             fi
         fi
     fi
-    
+
     log INFO "Sequential executor exiting with code: $exit_code"
     echo "Log saved to: $EXEC_LOG" >&2
-    
+
     exit $exit_code
 }
 
@@ -210,10 +225,10 @@ while true; do
         log INFO "Lock acquired"
         break
     fi
-    
+
     # Get current lock holder
     HOLDER_PID=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
-    
+
     if [ "$HOLDER_PID" -gt 0 ]; then
         # Check if holder is alive
         if kill -0 "$HOLDER_PID" 2>/dev/null; then
@@ -222,7 +237,7 @@ while true; do
                 local cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
                 local wait_time=$((WAIT_COUNT))
                 log INFO "Still waiting for PID $HOLDER_PID: $cmd (${wait_time}s elapsed)"
-                
+
                 # Show queue position
                 if [ -f "$QUEUE_FILE" ]; then
                     position=$(grep -n "^$$:" "$QUEUE_FILE" 2>/dev/null | cut -d: -f1 || echo "?")
@@ -235,7 +250,7 @@ while true; do
             log WARN "Lock holder (PID $HOLDER_PID) died unexpectedly"
             rm -f "$CURRENT_PID_FILE"
             rmdir "$LOCKFILE" 2>/dev/null || true
-            
+
             # This is an error condition - previous process died
             log ERROR "Previous process died - sequential chain broken"
             # Continue to acquire lock and execute
@@ -245,7 +260,7 @@ while true; do
         log WARN "Stale lock detected, cleaning up"
         rmdir "$LOCKFILE" 2>/dev/null || true
     fi
-    
+
     sleep 1
     ((WAIT_COUNT++))
 done
