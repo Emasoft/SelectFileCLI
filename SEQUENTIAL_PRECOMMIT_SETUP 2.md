@@ -1,15 +1,17 @@
 # Universal Sequential Pre-commit Setup Guide
 
-A complete, production-ready recipe for implementing TRUE sequential execution in any project. This prevents process explosions and memory exhaustion by ensuring only ONE process runs at a time.
+A complete, production-ready recipe for implementing TRUE sequential execution in any project. This prevents process explosions and memory exhaustion by ensuring only ONE process runs at a time, with full real-time logging and debugging capabilities.
 
 ## 🎯 What This Solves
 
 - **Process Explosions**: Prevents 70+ concurrent processes from spawning
-- **Memory Exhaustion**: Kills processes exceeding 2GB (configurable)
+- **Memory Exhaustion**: Kills processes exceeding 2GB (configurable) with real-time monitoring
 - **Git Deadlocks**: Prevents concurrent git operations from blocking
+- **Pre-commit Deadlocks**: Nested execution detection prevents circular waits
 - **Make Race Conditions**: Ensures only one make command runs at a time
 - **Orphaned Processes**: Automatic cleanup of abandoned processes
 - **Cross-project Conflicts**: Project-specific locks prevent interference
+- **Debugging Blindness**: Real-time logs track every process and memory usage
 
 ## ⚠️ Critical Implementation Requirements
 
@@ -21,6 +23,28 @@ A complete, production-ready recipe for implementing TRUE sequential execution i
 5. **All git operations must use git-safe.sh wrapper**
 
 This prevents the deadlock scenario where multiple operations bypass sequential control at the entry point, causing all processes to queue indefinitely.
+
+## 🚀 Quick Start Commands
+
+```bash
+# View real-time logs
+tail -f logs/*.log
+
+# Monitor queue visually  
+./scripts/monitor-queue.sh
+
+# Check for deadlocks
+grep "Already inside sequential executor" logs/*.log
+
+# Clean up stuck processes
+./scripts/kill-orphans.sh
+
+# Run any command sequentially
+./scripts/seq <command>
+
+# View memory usage
+grep "Total:" logs/memory_monitor_*.log | tail -10
+```
 
 ## Implementation Fixes and Lessons Learned
 
@@ -83,6 +107,46 @@ This prevents the deadlock scenario where multiple operations bypass sequential 
 9. **Make Sequential**: Global lock prevents concurrent make commands
 10. **Project Isolation**: All locks/queues use project hash - multiple projects OK
 11. **Deadlock Prevention**: Nested sequential executor calls bypass locking - no circular waits
+
+## 📊 Real-time Logging and Debugging
+
+### Log Files Location
+
+All execution is logged in real-time to the `./logs/` directory:
+- **Memory Monitor Logs**: `./logs/memory_monitor_YYYYMMDD_HHMMSS_PID.log`
+- **Sequential Executor Logs**: `./logs/sequential_executor_YYYYMMDD_HHMMSS_PID.log`
+
+### What's Logged
+
+1. **Sequential Executor Logs**:
+   - Command execution start/end with timestamps
+   - Queue position and wait times
+   - Lock acquisition/release events
+   - Git operation conflict detection
+   - Orphan process cleanup
+   - Exit codes and errors
+
+2. **Memory Monitor Logs**:
+   - Initial process tree with PIDs and memory usage
+   - Real-time memory tracking (every 5 seconds)
+   - High memory warnings (>50% of limit)
+   - Process termination events
+   - Periodic summaries (every 50 seconds)
+
+### Viewing Logs
+
+```bash
+# Real-time monitoring
+tail -f logs/*.log
+
+# View latest memory monitor log
+less $(ls -t logs/memory_monitor_*.log | head -1)
+
+# Search for issues
+grep -h "High memory usage" logs/*.log
+grep -h "Memory limit exceeded" logs/*.log
+grep -h "Already inside sequential executor" logs/*.log  # Deadlock detection
+```
 
 ## Prerequisites
 
@@ -3153,15 +3217,16 @@ done
 ## Summary
 
 This setup prevents process explosions and memory exhaustion through:
-1. **Sequential executor** - One process at a time
+1. **Sequential executor** - One process at a time with deadlock prevention
 2. **wait_all.sh** - Complete process tree termination
 3. **No exec bypasses** - All scripts use wait_all.sh
-4. **Test safety** - Sequential subprocess execution
+4. **Real-time logging** - Every process and memory usage tracked in ./logs/
 5. **Complete integration** - All tools use the system
 6. **Git operation safety** - Prevents concurrent git operations
-7. **Universal wait_all.sh usage** - EVERY command in EVERY hook
-8. **Memory monitor** - Kills processes exceeding 2GB limit
+7. **Pre-commit deadlock prevention** - Nested execution detection
+8. **Memory monitor** - Kills processes exceeding limits with detailed logs
 9. **Make sequential wrapper** - Prevents concurrent make commands
+10. **Visual queue monitoring** - See what's executing in real-time
 
 ## Key Safety Features
 
@@ -3186,19 +3251,22 @@ This guide provides a **complete, tested solution** for preventing process explo
 1. **9 Essential Scripts** - Each with a specific purpose
 2. **All Hooks Use wait_all.sh** - No exceptions, prevents deadlocks
 3. **Git Safety Wrapper** - Prevents concurrent git operations
-4. **Memory Monitor** - Automatic process termination at 2GB limit
+4. **Memory Monitor** - Automatic process termination with real-time logging
 5. **Make Sequential Wrapper** - Prevents concurrent make commands
-6. **Makefile Integration** - Safe commands for all operations
-7. **Comprehensive Testing** - Verification checklist ensures proper setup
-8. **Cross-platform Support** - Works on Linux, macOS, and BSD
-9. **Emergency Recovery** - Clear procedures for stuck processes
+6. **Real-time Logs** - Complete visibility in ./logs/ directory
+7. **Deadlock Prevention** - Nested execution detection
+8. **Comprehensive Testing** - Verification checklist ensures proper setup
+9. **Cross-platform Support** - Works on Linux, macOS, and BSD
+10. **Emergency Recovery** - Clear procedures for stuck processes
 
 **The most critical lessons learned**:
-1. Multiple git operations can bypass sequential control at the entry point, causing deadlocks
-2. Multiple make commands can spawn duplicate sequential executors
-3. Runaway processes can consume all system memory without limits
-4. Cleanup order matters - kill memory monitor first to prevent orphans
-5. No exec commands allowed - breaks process tree management
+1. Pre-commit hooks can deadlock when they use sequential executor - solved with nested detection
+2. Multiple git operations can bypass sequential control at the entry point, causing deadlocks
+3. Multiple make commands can spawn duplicate sequential executors
+4. Runaway processes can consume all system memory without limits
+5. Real-time logging is essential for debugging - all processes now log to ./logs/
+6. Cleanup order matters - kill memory monitor first to prevent orphans
+7. No exec commands allowed - breaks process tree management
 
 The solution implements multiple layers of protection:
 - EVERY command in EVERY hook uses wait_all.sh (NO EXCEPTIONS)
@@ -3239,3 +3307,50 @@ This setup has been battle-tested and proven to prevent:
 **Performance Impact**: Minimal (sequential but efficient)
 
 This recipe is production-ready, flawless, and can be implemented in any project to completely eliminate process explosion and memory exhaustion issues.
+
+## 📋 Quick Reference Card
+
+### Essential Commands
+```bash
+# View logs in real-time
+tail -f logs/*.log
+
+# Monitor queue
+./scripts/monitor-queue.sh
+
+# Run any command safely
+./scripts/seq <command>
+
+# Clean up stuck processes
+./scripts/kill-orphans.sh
+```
+
+### Debugging Commands
+```bash
+# Check for deadlocks
+grep "Already inside sequential executor" logs/*.log
+
+# Find memory issues
+grep "High memory usage" logs/*.log
+grep "Memory limit exceeded" logs/*.log
+
+# View current queue
+cat /tmp/seq-exec-*/queue.txt
+
+# Find recent executions
+ls -lt logs/ | head -10
+```
+
+### Configuration
+```bash
+# Set memory limit (MB)
+export MEMORY_LIMIT_MB=4096
+
+# Set timeout (seconds)  
+export TIMEOUT=3600
+
+# Enable debug mode
+export DEBUG_SEQUENTIAL=1
+```
+
+**Remember**: Every execution is logged to `./logs/` - use this for debugging any issues!
