@@ -210,8 +210,61 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# Check for multiple git operations (special handling)
+check_git_operations() {
+    # Only check if we're running a git command
+    if [[ "$1" == "git" ]] || [[ "$*" == *"git "* ]]; then
+        # Check for other git processes
+        local git_count=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null | grep -v $$ | wc -l || echo 0)
+        
+        if [ "$git_count" -gt 0 ]; then
+            log_warn "Other git operations detected:"
+            ps aux | grep -E "git (commit|merge|rebase|cherry-pick|push|pull)" | grep -v grep | grep -v $$ | while read line; do
+                log_warn "  $line"
+            done
+            
+            # Special handling for git operations
+            log_warn "Multiple git operations can cause conflicts!"
+            log_info "Waiting for other git operations to complete..."
+            
+            # Wait up to 10 seconds for git operations to complete
+            local wait_time=0
+            while [ "$wait_time" -lt 10 ]; do
+                git_count=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null | grep -v $$ | wc -l || echo 0)
+                if [ "$git_count" -eq 0 ]; then
+                    log_info "Other git operations completed"
+                    break
+                fi
+                sleep 1
+                wait_time=$((wait_time + 1))
+            done
+            
+            if [ "$git_count" -gt 0 ]; then
+                log_error "Git operations still running after 10s wait"
+                log_error "To prevent corruption, aborting this operation"
+                log_error "Please wait for other git operations to complete"
+                return 1
+            fi
+        fi
+        
+        # Check for git index lock
+        if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
+            log_error "Git index is locked - another git process may be running"
+            log_warn "If no git process is running, remove with:"
+            log_warn "  rm -f $PROJECT_ROOT/.git/index.lock"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # Main execution starts here
 log_info "Sequential executor starting for: $*"
+
+# Step 0: Check for git operation conflicts
+if ! check_git_operations "$@"; then
+    exit 1
+fi
 
 # Step 1: Kill any orphans before we start
 kill_orphans

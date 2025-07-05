@@ -85,7 +85,7 @@ usage() {
 TEMP_FILES=()
 cleanup() { rm -f -- "${TEMP_FILES[@]:-}"; }
 trap cleanup EXIT
-trap 'die "unexpected error on line $LINENO"' ERR
+# ERR trap removed - we handle errors explicitly where needed
 
 # ───────────────────────── Helpers: validation ────────────────────────────
 is_integer() { [[ $1 =~ ^[0-9]+$ ]]; }
@@ -176,7 +176,7 @@ run_once() {
   (( VERBOSE )) && echo "[wait_all] Try #$attempt → launching…" >&2
 
   # Start the command in a new session (setsid) so it gets its own PGID
-  # On macOS, setsid may not be available, so we fall back to direct execution
+  # Check if setsid is available (Linux/BSD) or use alternative (macOS)
   if command -v setsid >/dev/null 2>&1; then
     if [[ -n $LEGACY_CMD_STRING ]]; then
       setsid bash -c "$LEGACY_CMD_STRING" >"$tmp_out" 2>"$tmp_err" &
@@ -184,7 +184,7 @@ run_once() {
       setsid "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
     fi
   else
-    # Fallback for systems without setsid (e.g., macOS)
+    # macOS or systems without setsid - use bash job control
     if [[ -n $LEGACY_CMD_STRING ]]; then
       bash -c "$LEGACY_CMD_STRING" >"$tmp_out" 2>"$tmp_err" &
     else
@@ -193,9 +193,15 @@ run_once() {
   fi
   local main_pid=$!
   local pgid
-  # Give the process a moment to establish its process group
+  # Wait a moment for the process to start
   sleep 0.1
-  pgid=$(ps -o pgid= "$main_pid" 2>/dev/null | tr -d ' ' || echo "$main_pid")
+  # Get pgid with error handling
+  if pgid=$(ps -o pgid= "$main_pid" 2>/dev/null | tr -d ' '); then
+    :  # Success
+  else
+    # Fallback: use the PID as PGID
+    pgid="$main_pid"
+  fi
 
   local timed_out=0 exit_code=0
   local start_ns deadline_ns now_ns

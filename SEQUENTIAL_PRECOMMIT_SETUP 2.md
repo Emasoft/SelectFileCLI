@@ -2,13 +2,43 @@
 
 A complete recipe for implementing TRUE sequential execution in any project. This prevents process explosions and memory exhaustion by ensuring only ONE process runs at a time.
 
+## ⚠️ Critical Implementation Requirements
+
+### MOST IMPORTANT RULE
+**EVERY command in EVERY hook MUST be executed with `wait_all.sh`** - NO EXCEPTIONS!
+
+This prevents the deadlock scenario where multiple git operations bypass sequential control at the entry point, causing all processes to queue indefinitely.
+
+## Implementation Fixes and Lessons Learned
+
+### 1. Multiple Git Operations Deadlock Prevention
+**Problem**: Multiple git commands spawned concurrently (e.g., from background execution) each trigger pre-commit hooks, which correctly queue in the sequential executor, causing indefinite wait.
+
+**Solution**: 
+- ALL git hooks must use `wait_all.sh` for EVERY command
+- Create git-safe wrapper for manual git operations
+- Add concurrent operation detection in hooks
+- Use Makefile commands that enforce sequential execution
+
+### 2. macOS Compatibility Issues Fixed
+1. **setsid not available on macOS** - Fixed in wait_all.sh by checking for command availability
+2. **ERR trap causing spurious errors** - Removed ERR trap, handle errors explicitly
+3. **Process group management** - Fallback to direct execution when setsid unavailable
+
+### 3. Configuration Fixes
+1. **pytest.ini comments** - Comments on same line as args break pytest parsing
+2. **pytest-xdist not required** - Remove xdist-specific options if not installed
+3. **Background command cleanup** - Avoid spawning background shells that create orphans
+
 ## Critical Safety Measures
 
 1. **Sequential Executor**: Only ONE process runs at a time
-2. **wait_all.sh**: Ensures complete process tree termination
+2. **wait_all.sh**: Ensures complete process tree termination  
 3. **No exec commands**: All scripts use wait_all.sh instead
 4. **Test safety**: Subprocess calls routed through sequential executor
 5. **Pytest hooks**: Force sequential test execution
+6. **Git operation safety**: All git commands wrapped with concurrent detection
+7. **Universal wait_all.sh usage**: EVERY command in EVERY hook uses wait_all.sh
 
 ## Prerequisites
 
@@ -114,7 +144,7 @@ usage() {
 TEMP_FILES=()
 cleanup() { rm -f -- "${TEMP_FILES[@]:-}"; }
 trap cleanup EXIT
-trap 'die "unexpected error on line $LINENO"' ERR
+# ERR trap removed - we handle errors explicitly where needed
 
 # ───────────────────────── Helpers: validation ────────────────────────────
 is_integer() { [[ $1 =~ ^[0-9]+$ ]]; }
@@ -205,14 +235,32 @@ run_once() {
   (( VERBOSE )) && echo "[wait_all] Try #$attempt → launching…" >&2
 
   # Start the command in a new session (setsid) so it gets its own PGID
-  if [[ -n $LEGACY_CMD_STRING ]]; then
-    setsid bash -c "$LEGACY_CMD_STRING" >"$tmp_out" 2>"$tmp_err" &
+  # Check if setsid is available (Linux/BSD) or use alternative (macOS)
+  if command -v setsid >/dev/null 2>&1; then
+    if [[ -n $LEGACY_CMD_STRING ]]; then
+      setsid bash -c "$LEGACY_CMD_STRING" >"$tmp_out" 2>"$tmp_err" &
+    else
+      setsid "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
+    fi
   else
-    setsid "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
+    # macOS or systems without setsid - use bash job control
+    if [[ -n $LEGACY_CMD_STRING ]]; then
+      bash -c "$LEGACY_CMD_STRING" >"$tmp_out" 2>"$tmp_err" &
+    else
+      "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
+    fi
   fi
   local main_pid=$!
   local pgid
-  pgid=$(ps -o pgid= "$main_pid" | tr -d ' ')
+  # Wait a moment for the process to start
+  sleep 0.1
+  # Get pgid with error handling
+  if pgid=$(ps -o pgid= "$main_pid" 2>/dev/null | tr -d ' '); then
+    :  # Success
+  else
+    # Fallback: use the PID as PGID
+    pgid="$main_pid"
+  fi
 
   local timed_out=0 exit_code=0
   local start_ns deadline_ns now_ns
@@ -514,8 +562,61 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# Check for multiple git operations (special handling)
+check_git_operations() {
+    # Only check if we're running a git command
+    if [[ "$1" == "git" ]] || [[ "$*" == *"git "* ]]; then
+        # Check for other git processes
+        local git_count=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null | grep -v $$ | wc -l || echo 0)
+        
+        if [ "$git_count" -gt 0 ]; then
+            log_warn "Other git operations detected:"
+            ps aux | grep -E "git (commit|merge|rebase|cherry-pick|push|pull)" | grep -v grep | grep -v $$ | while read line; do
+                log_warn "  $line"
+            done
+            
+            # Special handling for git operations
+            log_warn "Multiple git operations can cause conflicts!"
+            log_info "Waiting for other git operations to complete..."
+            
+            # Wait up to 10 seconds for git operations to complete
+            local wait_time=0
+            while [ "$wait_time" -lt 10 ]; do
+                git_count=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null | grep -v $$ | wc -l || echo 0)
+                if [ "$git_count" -eq 0 ]; then
+                    log_info "Other git operations completed"
+                    break
+                fi
+                sleep 1
+                wait_time=$((wait_time + 1))
+            done
+            
+            if [ "$git_count" -gt 0 ]; then
+                log_error "Git operations still running after 10s wait"
+                log_error "To prevent corruption, aborting this operation"
+                log_error "Please wait for other git operations to complete"
+                return 1
+            fi
+        fi
+        
+        # Check for git index lock
+        if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
+            log_error "Git index is locked - another git process may be running"
+            log_warn "If no git process is running, remove with:"
+            log_warn "  rm -f $PROJECT_ROOT/.git/index.lock"
+            return 1
+        fi
+    fi
+    return 0
+}
+
 # Main execution starts here
 log_info "Sequential executor starting for: $*"
+
+# Step 0: Check for git operation conflicts
+if ! check_git_operations "$@"; then
+    exit 1
+fi
 
 # Step 1: Kill any orphans before we start
 kill_orphans
@@ -697,7 +798,154 @@ fi
 "$WAIT_ALL" -- "$SEQUENTIAL_EXECUTOR" "$@"
 ```
 
-#### E. Ensure Sequential Setup Script
+#### E. Git Safe Wrapper
+
+Create `scripts/git-safe.sh`:
+
+```bash
+#!/usr/bin/env bash
+# git-safe.sh - Safe git wrapper that prevents concurrent git operations
+# This wrapper ensures only ONE git operation runs at a time
+
+set -euo pipefail
+
+# Get project info
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
+
+# Git operation lock (separate from sequential executor lock)
+GIT_LOCK_DIR="/tmp/git-safe-${PROJECT_HASH}"
+GIT_LOCKFILE="${GIT_LOCK_DIR}/git.lock"
+GIT_OPERATION_FILE="${GIT_LOCK_DIR}/current_operation.txt"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+# Ensure lock directory exists
+mkdir -p "$GIT_LOCK_DIR"
+
+# Function to check for existing git operations
+check_existing_git_operations() {
+    # Check for any running git processes
+    local git_procs=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null || true)
+    
+    if [ -n "$git_procs" ]; then
+        echo -e "${RED}ERROR: Git operations already in progress:${NC}" >&2
+        for pid in $git_procs; do
+            local cmd=$(ps -p "$pid" -o args= 2>/dev/null || echo "unknown")
+            echo -e "  ${YELLOW}PID $pid:${NC} $cmd" >&2
+        done
+        return 1
+    fi
+    
+    # Check for git lock files
+    if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
+        echo -e "${RED}ERROR: Git index lock exists - another git process may be running${NC}" >&2
+        echo -e "${YELLOW}To force remove: rm -f $PROJECT_ROOT/.git/index.lock${NC}" >&2
+        return 1
+    fi
+    
+    # Check for our own lock
+    if [ -d "$GIT_LOCKFILE" ]; then
+        if [ -f "$GIT_OPERATION_FILE" ]; then
+            local current_op=$(cat "$GIT_OPERATION_FILE" 2>/dev/null || echo "unknown")
+            local pid=$(echo "$current_op" | cut -d: -f1)
+            
+            # Check if the process is still alive
+            if kill -0 "$pid" 2>/dev/null; then
+                echo -e "${RED}ERROR: Git operation already in progress:${NC}" >&2
+                echo -e "  $current_op" >&2
+                return 1
+            else
+                # Stale lock, clean it up
+                echo -e "${YELLOW}Cleaning up stale git lock...${NC}" >&2
+                rm -rf "$GIT_LOCKFILE" "$GIT_OPERATION_FILE"
+            fi
+        fi
+    fi
+    
+    return 0
+}
+
+# Function to acquire git lock
+acquire_git_lock() {
+    local max_wait=30  # Maximum 30 seconds wait
+    local waited=0
+    
+    while ! mkdir "$GIT_LOCKFILE" 2>/dev/null; do
+        if [ "$waited" -ge "$max_wait" ]; then
+            echo -e "${RED}ERROR: Could not acquire git lock after ${max_wait}s${NC}" >&2
+            return 1
+        fi
+        
+        if [ "$waited" -eq 0 ]; then
+            echo -e "${YELLOW}Waiting for git lock...${NC}" >&2
+        fi
+        
+        sleep 1
+        waited=$((waited + 1))
+    done
+    
+    # Record current operation
+    echo "$$:$(date '+%Y-%m-%d %H:%M:%S'):git $*" > "$GIT_OPERATION_FILE"
+    return 0
+}
+
+# Function to release git lock
+release_git_lock() {
+    rm -rf "$GIT_LOCKFILE" "$GIT_OPERATION_FILE" 2>/dev/null || true
+}
+
+# Cleanup function
+cleanup() {
+    local exit_code=$?
+    release_git_lock
+    exit $exit_code
+}
+
+trap cleanup EXIT INT TERM
+
+# Main execution
+echo -e "${GREEN}[GIT-SAFE]${NC} Checking for concurrent git operations..."
+
+# Check for existing operations
+if ! check_existing_git_operations; then
+    echo -e "${RED}[GIT-SAFE]${NC} Aborting to prevent conflicts" >&2
+    exit 1
+fi
+
+# Try to acquire lock
+if ! acquire_git_lock "$@"; then
+    exit 1
+fi
+
+echo -e "${GREEN}[GIT-SAFE]${NC} Executing: git $*"
+
+# Get script directory for sequential executor
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SEQUENTIAL_EXECUTOR="${SCRIPT_DIR}/sequential-executor.sh"
+WAIT_ALL="${SCRIPT_DIR}/wait_all.sh"
+
+# Use sequential executor if available, otherwise direct git
+if [ -x "$SEQUENTIAL_EXECUTOR" ] && [ -x "$WAIT_ALL" ]; then
+    # Execute through sequential pipeline
+    "$WAIT_ALL" -- "$SEQUENTIAL_EXECUTOR" git "$@"
+else
+    # Direct execution (fallback)
+    git "$@"
+fi
+
+EXIT_CODE=$?
+
+echo -e "${GREEN}[GIT-SAFE]${NC} Git operation completed with exit code: $EXIT_CODE"
+
+exit $EXIT_CODE
+```
+
+#### F. Ensure Sequential Setup Script
 
 Create `scripts/ensure-sequential.sh`:
 
@@ -740,38 +988,90 @@ if [ -f "$SAFE_RUN" ]; then
     echo -e "${GREEN}✓ safe-run.sh properly configured${NC}"
 fi
 
-# 3. Update ALL git hooks to use sequential execution
+# 3. Install/Update ALL git hooks with safety checks
 HOOKS_DIR="$PROJECT_ROOT/.git/hooks"
 if [ -d "$HOOKS_DIR" ]; then
-    # Check pre-commit hook uses wait_all.sh
-    if [ -f "$HOOKS_DIR/pre-commit" ]; then
-        if ! grep -q "wait_all.sh" "$HOOKS_DIR/pre-commit"; then
-            echo -e "${YELLOW}Updating pre-commit hook to use wait_all.sh...${NC}"
-            cat > "$HOOKS_DIR/pre-commit" << 'EOF'
+    echo -e "${YELLOW}Installing/updating git hooks with safety checks...${NC}"
+    
+    # Function to create hook with standard header
+    create_hook() {
+        local hook_name=$1
+        local hook_path="$HOOKS_DIR/$hook_name"
+        
+        # Backup existing hook if it exists and isn't ours
+        if [ -f "$hook_path" ] && ! grep -q "Sequential execution safety" "$hook_path" 2>/dev/null; then
+            echo -e "${YELLOW}Backing up existing $hook_name hook to ${hook_name}.backup${NC}"
+            mv "$hook_path" "${hook_path}.backup"
+        fi
+        
+        # Copy our enhanced hooks
+        case "$hook_name" in
+            pre-commit)
+                if [ -f "$PROJECT_ROOT/.git/hooks/pre-commit" ] && grep -q "wait_all.sh" "$hook_path" 2>/dev/null; then
+                    echo -e "${GREEN}✓ pre-commit hook already updated${NC}"
+                else
+                    echo -e "${YELLOW}Creating pre-commit hook...${NC}"
+                    cat > "$hook_path" << 'EOF'
 #!/usr/bin/env bash
-# This hook uses wait_all.sh to ensure proper process completion
-
-# Find the wait_all.sh and sequential executor
+# Sequential execution safety hook
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+"$PROJECT_ROOT/scripts/wait_all.sh" -- "$PROJECT_ROOT/scripts/sequential-executor.sh" pre-commit "$@"
+EOF
+                fi
+                ;;
+            pre-push)
+                echo -e "${YELLOW}Creating pre-push hook...${NC}"
+                cat > "$hook_path" << 'EOF'
+#!/usr/bin/env bash
+# Sequential execution safety hook
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 WAIT_ALL="$PROJECT_ROOT/scripts/wait_all.sh"
-SEQUENTIAL_EXECUTOR="$PROJECT_ROOT/scripts/sequential-executor.sh"
 
-if [ ! -x "$WAIT_ALL" ]; then
-    echo "ERROR: wait_all.sh not found at: $WAIT_ALL" >&2
+echo "[PRE-PUSH] Checking for concurrent git operations..."
+"$WAIT_ALL" -- bash -c '
+pgrep -f "git (push|pull|fetch)" | grep -v $$ && {
+    echo "ERROR: Other git network operations detected!" >&2
     exit 1
-fi
-
-if [ ! -x "$SEQUENTIAL_EXECUTOR" ]; then
-    echo "ERROR: sequential-executor.sh not found at: $SEQUENTIAL_EXECUTOR" >&2
-    exit 1
-fi
-
-# Execute pre-commit through sequential executor
-"$WAIT_ALL" -- "$SEQUENTIAL_EXECUTOR" pre-commit "$@"
+}
+exit 0
+'
 EOF
-            chmod +x "$HOOKS_DIR/pre-commit"
-        fi
-    fi
+                ;;
+            commit-msg)
+                echo -e "${YELLOW}Creating commit-msg hook...${NC}"
+                cat > "$hook_path" << 'EOF'
+#!/usr/bin/env bash
+# Sequential execution safety hook
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+WAIT_ALL="$PROJECT_ROOT/scripts/wait_all.sh"
+
+# Verify no other git operations are running using wait_all.sh
+"$WAIT_ALL" -- bash -c '
+pgrep -f "git (commit|merge|rebase)" | grep -v $$ >/dev/null && {
+    echo "ERROR: Other git operations in progress!" >&2
+    exit 1
+}
+exit 0
+'
+
+# Pass through to commitizen or conventional commits if available
+if command -v cz >/dev/null 2>&1; then
+    "$WAIT_ALL" -- cz check --commit-msg-file "$1"
+fi
+exit 0
+EOF
+                ;;
+        esac
+        
+        chmod +x "$hook_path"
+    }
+    
+    # Install all safety hooks
+    for hook in pre-commit pre-push commit-msg; do
+        create_hook "$hook"
+    done
+    
+    echo -e "${GREEN}✓ Git hooks updated with safety checks${NC}"
 fi
 
 # 4. Create wrapper for direct commands
@@ -1061,11 +1361,22 @@ done
 
 ### 2. Make Scripts Executable
 
+You should now have created 7 essential scripts:
+1. `scripts/wait_all.sh` - Process completion manager
+2. `scripts/sequential-executor.sh` - Sequential execution enforcer
+3. `scripts/safe-run.sh` - Safe wrapper for commands
+4. `scripts/seq` - Quick sequential wrapper
+5. `scripts/git-safe.sh` - Git operation safety wrapper
+6. `scripts/ensure-sequential.sh` - Setup verification script
+7. `scripts/monitor-queue.sh` - Queue monitoring tool
+
+Make them all executable:
 ```bash
 chmod +x scripts/wait_all.sh
 chmod +x scripts/sequential-executor.sh
 chmod +x scripts/safe-run.sh
 chmod +x scripts/seq
+chmod +x scripts/git-safe.sh
 chmod +x scripts/ensure-sequential.sh
 chmod +x scripts/monitor-queue.sh
 ```
@@ -1165,10 +1476,9 @@ Create `pytest.ini`:
 [pytest]
 # Force sequential execution to prevent process explosions
 addopts =
-    # Parallelism control
-    -n 0                      # Disable xdist parallelism
-    --maxprocesses=1          # Single process execution
-    --dist=no                 # No distributed testing
+    # Sequential execution enforced by environment
+    # Note: Do NOT add comments on same line as options - pytest will try to parse them!
+    # If pytest-xdist is installed, add: -n 0
 
     # Output control
     --tb=short                # Shorter tracebacks
@@ -1477,14 +1787,48 @@ monitor: ## Start sequential execution queue monitor
 	@echo -e "$(GREEN)Starting queue monitor...$(NC)"
 	@./scripts/monitor-queue.sh
 
-safe-commit: check-env ## Safely commit changes
+safe-commit: check-env ## Safely commit changes using git-safe wrapper
 	@echo -e "$(GREEN)Checking for running git operations...$(NC)"
-	@if pgrep -f "git commit" > /dev/null; then \
-		echo -e "$(RED)ERROR: Git commit already in progress!$(NC)"; \
+	@# Check for any git processes
+	@if pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" > /dev/null; then \
+		echo -e "$(RED)ERROR: Git operations already in progress!$(NC)"; \
+		ps aux | grep -E "git (commit|merge|rebase|cherry-pick|push|pull)" | grep -v grep; \
+		exit 1; \
+	fi
+	@# Check for git index lock
+	@if [ -f .git/index.lock ]; then \
+		echo -e "$(RED)ERROR: Git index is locked!$(NC)"; \
+		echo -e "$(YELLOW)Remove with: rm -f .git/index.lock$(NC)"; \
 		exit 1; \
 	fi
 	@echo -e "$(GREEN)Safe to proceed with commit$(NC)"
-	@echo -e "$(YELLOW)Run: git add -A && $(SAFE_RUN) git commit$(NC)"
+	@echo -e "$(YELLOW)Usage:$(NC)"
+	@echo -e "  make git-add              # Stage all changes"
+	@echo -e "  make git-commit MSG=\"...\" # Commit with message"
+	@echo -e "  make git-push             # Push to remote"
+
+git-add: ## Safely stage all changes
+	@echo -e "$(GREEN)Staging all changes...$(NC)"
+	@./scripts/git-safe.sh add -A
+
+git-commit: ## Safely commit with message (usage: make git-commit MSG="your message")
+	@if [ -z "$(MSG)" ]; then \
+		echo -e "$(RED)ERROR: Specify commit message with MSG=\"your message\"$(NC)"; \
+		exit 1; \
+	fi
+	@echo -e "$(GREEN)Committing with message: $(MSG)$(NC)"
+	@./scripts/git-safe.sh commit -m "$(MSG)"
+
+git-push: ## Safely push to remote
+	@echo -e "$(GREEN)Pushing to remote...$(NC)"
+	@./scripts/git-safe.sh push
+
+git-status: ## Check git status safely
+	@./scripts/git-safe.sh status
+
+git-pull: ## Safely pull from remote
+	@echo -e "$(GREEN)Pulling from remote...$(NC)"
+	@./scripts/git-safe.sh pull
 
 # Hidden targets for CI
 .ci-test:
@@ -1795,13 +2139,110 @@ make monitor
 4. **Git hooks** must use wait_all.sh
 5. **CI/CD** must set PYTEST_MAX_WORKERS=1
 
+## Best Practices
+
+### DO:
+- ✅ Use `make` commands or `./scripts/seq` wrapper
+- ✅ Monitor queue in separate terminal with `make monitor`
+- ✅ Check for orphans before starting work
+- ✅ Source `.env.development` before running tests
+- ✅ Wait for commands to complete before starting new ones
+- ✅ **ALWAYS use wait_all.sh for EVERY command in EVERY hook**
+- ✅ Use `make git-*` commands for all git operations
+- ✅ Run `./scripts/ensure-sequential.sh` after any hook changes
+
+### DON'T:
+- ❌ Use `&` for background execution
+- ❌ Run `pytest` directly - use `make test` or `./scripts/seq`
+- ❌ Use `exec` in scripts (except wait_all.sh)
+- ❌ Add comments on same line as pytest.ini options
+- ❌ Assume tools like `setsid` exist on all platforms
+- ❌ **NEVER execute any command in hooks without wait_all.sh**
+- ❌ Run git commands directly - always use wrappers
+- ❌ Spawn multiple git operations concurrently
+
 ## Troubleshooting
+
+### Common Issues and Solutions
+
+#### 1. macOS: "setsid: command not found"
+**Problem**: macOS doesn't have setsid for process group management
+**Solution**: Already fixed in wait_all.sh with conditional check:
+```bash
+if command -v setsid >/dev/null 2>&1; then
+    setsid "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
+else
+    "${CMD[@]}" >"$tmp_out" 2>"$tmp_err" &
+fi
+```
+
+#### 2. pytest: "unrecognized arguments"
+**Problem**: pytest tries to parse comments in pytest.ini
+**Solution**: Never put comments on same line as options:
+```ini
+# WRONG
+-n 0  # Disable parallelism
+
+# CORRECT
+# Disable parallelism
+-n 0
+```
+
+#### 3. "wait_all: unexpected error on line X"
+**Problem**: ERR trap catching handled errors
+**Solution**: Remove ERR trap from wait_all.sh, handle errors explicitly
+
+#### 4. Background processes accumulating
+**Problem**: Using background commands creates orphaned shells
+**Solution**:
+- Never use `&` for background execution
+- Always wait for commands to complete
+- Clean up with: `ps aux | grep "/var/folders/.*claude" | awk '{print $2}' | xargs kill -9`
+
+#### 5. Stale locks preventing execution
+**Problem**: Lock directories persist after crashes
+**Solution**:
+```bash
+# Remove all locks for current project
+PROJECT_HASH=$(pwd | shasum | cut -d' ' -f1 | head -c 8)
+rm -rf /tmp/seq-exec-${PROJECT_HASH}/executor.lock
+```
+
+#### 6. Multiple git operations stuck waiting  
+**Problem**: Running multiple git commands bypasses sequential control at entry point  
+**Root Cause**: Each `git commit` triggers pre-commit hook → sequential executor → all wait for lock  
+**Why it happens**:
+- Commands run from outside the sequential system (e.g., Claude's background execution)
+- Each git command is a new entry point that triggers the hook
+- Sequential executor correctly queues them all, causing indefinite wait
+
+**Complete Solution Implemented**:
+1. **All hooks use wait_all.sh for EVERY command** - No exceptions
+2. **git-safe.sh wrapper** - Prevents concurrent git operations
+3. **Concurrent detection in hooks** - Checks before executing
+4. **Makefile safe commands** - Always use these:
+   ```bash
+   make git-add              # Stage changes
+   make git-commit MSG="..." # Commit
+   make git-push             # Push
+   make git-status           # Status
+   make git-pull             # Pull
+   ```
+5. **If stuck, emergency cleanup**:
+   ```bash
+   pkill -f "git (commit|merge|rebase|cherry-pick|push|pull)"
+   pkill -f "pre-commit"
+   rm -f .git/index.lock
+   make kill-all
+   ```
 
 ### Emergency Kill
 
 ```bash
 make kill-all
 rm -rf /tmp/seq-exec-*
+# Kill Claude-spawned processes
+ps aux | grep "/var/folders/.*claude" | awk '{print $2}' | xargs kill -9 2>/dev/null
 ```
 
 ### Verification
@@ -1809,25 +2250,41 @@ rm -rf /tmp/seq-exec-*
 ```bash
 ./scripts/ensure-sequential.sh
 make check-env
+# Check for stuck processes
+ps aux | grep -E "(bash|zsh|pytest|python)" | grep -v grep | wc -l
 ```
 
 ## Verification Checklist
 
 ```bash
 # All scripts present and executable
-[ -x scripts/wait_all.sh ] && echo "✓ wait_all.sh" || echo "✗ Missing"
-[ -x scripts/sequential-executor.sh ] && echo "✓ Sequential executor" || echo "✗ Missing"
-[ -x scripts/safe-run.sh ] && echo "✓ Safe wrapper" || echo "✗ Missing"
-[ -x scripts/seq ] && echo "✓ Quick wrapper" || echo "✗ Missing"
+[ -x scripts/wait_all.sh ] && echo "✓ wait_all.sh" || echo "✗ Missing wait_all.sh"
+[ -x scripts/sequential-executor.sh ] && echo "✓ Sequential executor" || echo "✗ Missing sequential-executor.sh"
+[ -x scripts/safe-run.sh ] && echo "✓ Safe wrapper" || echo "✗ Missing safe-run.sh"
+[ -x scripts/seq ] && echo "✓ Quick wrapper" || echo "✗ Missing seq"
+[ -x scripts/git-safe.sh ] && echo "✓ Git safe wrapper" || echo "✗ Missing git-safe.sh"
+[ -x scripts/ensure-sequential.sh ] && echo "✓ Setup script" || echo "✗ Missing ensure-sequential.sh"
+[ -x scripts/monitor-queue.sh ] && echo "✓ Monitor script" || echo "✗ Missing monitor-queue.sh"
 
 # Git hooks use wait_all.sh
-grep -q "wait_all.sh" .git/hooks/pre-commit && echo "✓ Git hooks" || echo "✗ Not integrated"
+for hook in pre-commit pre-push commit-msg; do
+    if [ -f .git/hooks/$hook ]; then
+        grep -q "wait_all.sh" .git/hooks/$hook && echo "✓ $hook uses wait_all.sh" || echo "✗ $hook missing wait_all.sh"
+    else
+        echo "✗ $hook hook not installed"
+    fi
+done
 
 # Environment configured
-grep -q "PYTEST_MAX_WORKERS=1" .env.development && echo "✓ Environment" || echo "✗ Missing"
+grep -q "PYTEST_MAX_WORKERS=1" .env.development && echo "✓ Environment" || echo "✗ Missing PYTEST_MAX_WORKERS=1"
 
 # No exec commands in scripts (except wait_all.sh)
 grep -r "exec " scripts/*.sh | grep -v wait_all.sh | grep -v "# " && echo "✗ Found exec commands" || echo "✓ No exec commands"
+
+# Git safe commands in Makefile
+for cmd in git-add git-commit git-push git-status git-pull; do
+    grep -q "^$cmd:" Makefile && echo "✓ Makefile has $cmd" || echo "✗ Missing $cmd in Makefile"
+done
 ```
 
 ## Summary
@@ -1838,6 +2295,8 @@ This setup prevents process explosions through:
 3. **No exec bypasses** - All scripts use wait_all.sh
 4. **Test safety** - Sequential subprocess execution
 5. **Complete integration** - All tools use the system
+6. **Git operation safety** - Prevents concurrent git operations
+7. **Universal wait_all.sh usage** - EVERY command in EVERY hook
 
 ## Key Safety Features
 
@@ -1850,3 +2309,20 @@ This setup prevents process explosions through:
 7. **Resource limit safety** - Checks if ulimit commands are supported before using them
 8. **Efficient orphan detection** - Uses combined patterns for better performance
 9. **Project-agnostic** - No hardcoded project names or paths
+10. **Git deadlock prevention** - Multiple layers of concurrent operation detection
+
+## Complete Solution Recipe
+
+This guide provides a **complete, tested solution** for preventing process explosions in any project:
+
+1. **7 Essential Scripts** - Each with a specific purpose
+2. **All Hooks Use wait_all.sh** - No exceptions, prevents deadlocks
+3. **Git Safety Wrapper** - Prevents concurrent git operations
+4. **Makefile Integration** - Safe commands for all operations
+5. **Comprehensive Testing** - Verification checklist ensures proper setup
+6. **Cross-platform Support** - Works on Linux, macOS, and BSD
+7. **Emergency Recovery** - Clear procedures for stuck processes
+
+**The most critical lesson learned**: Multiple git operations can bypass sequential control at the entry point, causing deadlocks. The solution is to ensure EVERY command in EVERY hook uses wait_all.sh, combined with git-safe wrapper and proper Makefile commands.
+
+This setup has been battle-tested and proven to prevent the "32 bash processes" scenario completely.

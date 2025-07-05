@@ -36,38 +36,90 @@ if [ -f "$SAFE_RUN" ]; then
     echo -e "${GREEN}✓ safe-run.sh properly configured${NC}"
 fi
 
-# 3. Update ALL git hooks to use sequential execution
+# 3. Install/Update ALL git hooks with safety checks
 HOOKS_DIR="$PROJECT_ROOT/.git/hooks"
 if [ -d "$HOOKS_DIR" ]; then
-    # Check pre-commit hook uses wait_all.sh
-    if [ -f "$HOOKS_DIR/pre-commit" ]; then
-        if ! grep -q "wait_all.sh" "$HOOKS_DIR/pre-commit"; then
-            echo -e "${YELLOW}Updating pre-commit hook to use wait_all.sh...${NC}"
-            cat > "$HOOKS_DIR/pre-commit" << 'EOF'
+    echo -e "${YELLOW}Installing/updating git hooks with safety checks...${NC}"
+    
+    # Function to create hook with standard header
+    create_hook() {
+        local hook_name=$1
+        local hook_path="$HOOKS_DIR/$hook_name"
+        
+        # Backup existing hook if it exists and isn't ours
+        if [ -f "$hook_path" ] && ! grep -q "Sequential execution safety" "$hook_path" 2>/dev/null; then
+            echo -e "${YELLOW}Backing up existing $hook_name hook to ${hook_name}.backup${NC}"
+            mv "$hook_path" "${hook_path}.backup"
+        fi
+        
+        # Copy our enhanced hooks
+        case "$hook_name" in
+            pre-commit)
+                if [ -f "$PROJECT_ROOT/.git/hooks/pre-commit" ] && grep -q "wait_all.sh" "$hook_path" 2>/dev/null; then
+                    echo -e "${GREEN}✓ pre-commit hook already updated${NC}"
+                else
+                    echo -e "${YELLOW}Creating pre-commit hook...${NC}"
+                    cat > "$hook_path" << 'EOF'
 #!/usr/bin/env bash
-# This hook uses wait_all.sh to ensure proper process completion
-
-# Find the wait_all.sh and sequential executor
+# Sequential execution safety hook
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+"$PROJECT_ROOT/scripts/wait_all.sh" -- "$PROJECT_ROOT/scripts/sequential-executor.sh" pre-commit "$@"
+EOF
+                fi
+                ;;
+            pre-push)
+                echo -e "${YELLOW}Creating pre-push hook...${NC}"
+                cat > "$hook_path" << 'EOF'
+#!/usr/bin/env bash
+# Sequential execution safety hook
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 WAIT_ALL="$PROJECT_ROOT/scripts/wait_all.sh"
-SEQUENTIAL_EXECUTOR="$PROJECT_ROOT/scripts/sequential-executor.sh"
 
-if [ ! -x "$WAIT_ALL" ]; then
-    echo "ERROR: wait_all.sh not found at: $WAIT_ALL" >&2
+echo "[PRE-PUSH] Checking for concurrent git operations..."
+"$WAIT_ALL" -- bash -c '
+pgrep -f "git (push|pull|fetch)" | grep -v $$ && {
+    echo "ERROR: Other git network operations detected!" >&2
     exit 1
-fi
-
-if [ ! -x "$SEQUENTIAL_EXECUTOR" ]; then
-    echo "ERROR: sequential-executor.sh not found at: $SEQUENTIAL_EXECUTOR" >&2
-    exit 1
-fi
-
-# Execute pre-commit through sequential executor
-"$WAIT_ALL" -- "$SEQUENTIAL_EXECUTOR" pre-commit "$@"
+}
+exit 0
+'
 EOF
-            chmod +x "$HOOKS_DIR/pre-commit"
-        fi
-    fi
+                ;;
+            commit-msg)
+                echo -e "${YELLOW}Creating commit-msg hook...${NC}"
+                cat > "$hook_path" << 'EOF'
+#!/usr/bin/env bash
+# Sequential execution safety hook
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+WAIT_ALL="$PROJECT_ROOT/scripts/wait_all.sh"
+
+# Verify no other git operations are running using wait_all.sh
+"$WAIT_ALL" -- bash -c '
+pgrep -f "git (commit|merge|rebase)" | grep -v $$ >/dev/null && {
+    echo "ERROR: Other git operations in progress!" >&2
+    exit 1
+}
+exit 0
+'
+
+# Pass through to commitizen or conventional commits if available
+if command -v cz >/dev/null 2>&1; then
+    "$WAIT_ALL" -- cz check --commit-msg-file "$1"
+fi
+exit 0
+EOF
+                ;;
+        esac
+        
+        chmod +x "$hook_path"
+    }
+    
+    # Install all safety hooks
+    for hook in pre-commit pre-push commit-msg; do
+        create_hook "$hook"
+    done
+    
+    echo -e "${GREEN}✓ Git hooks updated with safety checks${NC}"
 fi
 
 # 4. Create wrapper for direct commands

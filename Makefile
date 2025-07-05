@@ -1,7 +1,7 @@
 # Makefile for Safe Sequential Execution
 # Enforces safe execution patterns to prevent resource exhaustion
 
-.PHONY: help test lint format check clean install dev-setup monitor kill-all safe-commit
+.PHONY: help test lint format check clean install dev-setup monitor kill-all safe-commit git-add git-commit git-push git-status git-pull
 
 # Default shell
 SHELL := /bin/bash
@@ -109,14 +109,48 @@ monitor: ## Start sequential execution queue monitor
 	@echo -e "$(GREEN)Starting queue monitor...$(NC)"
 	@./scripts/monitor-queue.sh
 
-safe-commit: check-env ## Safely commit changes
+safe-commit: check-env ## Safely commit changes using git-safe wrapper
 	@echo -e "$(GREEN)Checking for running git operations...$(NC)"
-	@if pgrep -f "git commit" > /dev/null; then \
-		echo -e "$(RED)ERROR: Git commit already in progress!$(NC)"; \
+	@# Check for any git processes
+	@if pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" > /dev/null; then \
+		echo -e "$(RED)ERROR: Git operations already in progress!$(NC)"; \
+		ps aux | grep -E "git (commit|merge|rebase|cherry-pick|push|pull)" | grep -v grep; \
+		exit 1; \
+	fi
+	@# Check for git index lock
+	@if [ -f .git/index.lock ]; then \
+		echo -e "$(RED)ERROR: Git index is locked!$(NC)"; \
+		echo -e "$(YELLOW)Remove with: rm -f .git/index.lock$(NC)"; \
 		exit 1; \
 	fi
 	@echo -e "$(GREEN)Safe to proceed with commit$(NC)"
-	@echo -e "$(YELLOW)Run: git add -A && $(SAFE_RUN) git commit$(NC)"
+	@echo -e "$(YELLOW)Usage:$(NC)"
+	@echo -e "  make git-add              # Stage all changes"
+	@echo -e "  make git-commit MSG=\"...\" # Commit with message"
+	@echo -e "  make git-push             # Push to remote"
+
+git-add: ## Safely stage all changes
+	@echo -e "$(GREEN)Staging all changes...$(NC)"
+	@./scripts/git-safe.sh add -A
+
+git-commit: ## Safely commit with message (usage: make git-commit MSG="your message")
+	@if [ -z "$(MSG)" ]; then \
+		echo -e "$(RED)ERROR: Specify commit message with MSG=\"your message\"$(NC)"; \
+		exit 1; \
+	fi
+	@echo -e "$(GREEN)Committing with message: $(MSG)$(NC)"
+	@./scripts/git-safe.sh commit -m "$(MSG)"
+
+git-push: ## Safely push to remote
+	@echo -e "$(GREEN)Pushing to remote...$(NC)"
+	@./scripts/git-safe.sh push
+
+git-status: ## Check git status safely
+	@./scripts/git-safe.sh status
+
+git-pull: ## Safely pull from remote
+	@echo -e "$(GREEN)Pulling from remote...$(NC)"
+	@./scripts/git-safe.sh pull
 
 # Hidden targets for CI
 .ci-test:
