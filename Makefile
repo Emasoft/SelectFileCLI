@@ -12,8 +12,10 @@ YELLOW := \033[1;33m
 RED := \033[0;31m
 NC := \033[0m # No Color
 
-# Safe run wrapper
+# Safe run wrapper - ensures sequential execution
 SAFE_RUN := ./scripts/safe-run.sh
+# Make sequential wrapper - prevents concurrent make commands
+MAKE_SEQ := ./scripts/make-sequential.sh
 
 help: ## Show this help message
 	@echo -e "$(GREEN)Safe Sequential Execution Commands$(NC)"

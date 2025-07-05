@@ -180,6 +180,11 @@ is_our_process_alive() {
 cleanup() {
     local exit_code=$?
 
+    # Stop memory monitor if running
+    if [ -n "${MONITOR_PID:-}" ]; then
+        kill $MONITOR_PID 2>/dev/null || true
+    fi
+
     # Remove our PID from current if it's us
     if [ -f "$CURRENT_PID_FILE" ]; then
         local current_pid=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
@@ -349,10 +354,23 @@ if [ ! -x "$WAIT_ALL" ]; then
     exit 1
 fi
 
+# Start memory monitor in background
+MEMORY_MONITOR="${SCRIPT_DIR}/memory_monitor.sh"
+if [ -x "$MEMORY_MONITOR" ]; then
+    log_info "Starting memory monitor (limit: ${MEMORY_LIMIT_MB:-2048}MB)"
+    "$MEMORY_MONITOR" --pid $$ --limit "${MEMORY_LIMIT_MB:-2048}" &
+    MONITOR_PID=$!
+fi
+
 # Execute through wait_all.sh with timeout from environment
 EXEC_TIMEOUT="${TIMEOUT:-1800}"  # Default 30 minutes
 "$WAIT_ALL" --timeout "$EXEC_TIMEOUT" -- "$@"
 EXIT_CODE=$?
+
+# Stop memory monitor
+if [ -n "${MONITOR_PID:-}" ]; then
+    kill $MONITOR_PID 2>/dev/null || true
+fi
 
 # Step 5: Cleanup our execution
 log_info "Command completed with exit code: $EXIT_CODE"
