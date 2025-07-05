@@ -74,7 +74,7 @@ repos:
     hooks:
       - id: mypy-safe
         name: Type checking (safe)
-        entry: ./scripts/safe-run.sh uv run mypy
+        entry: ./scripts/pre-commit-safe.sh uv run mypy
         language: system
         types: [python]
         require_serial: true
@@ -84,7 +84,7 @@ repos:
 
       - id: trufflehog-safe
         name: Secret detection (safe)
-        entry: ./scripts/safe-run.sh trufflehog git file://. --only-verified --fail --no-update
+        entry: ./scripts/pre-commit-safe.sh trufflehog git file://. --only-verified --fail --no-update
         language: system
         pass_filenames: false
         require_serial: true

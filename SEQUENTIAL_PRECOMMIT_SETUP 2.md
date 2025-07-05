@@ -79,19 +79,28 @@ EOF
 chmod +x wait_all.sh
 ```
 
-#### 2.2 `sequential-executor.sh` - Main Controller
+#### 2.2 `sequential-executor.sh` - Main Controller (V2 with Deadlock Prevention)
+
+**IMPORTANT**: The production version includes advanced deadlock detection and prevention. Key features:
+- Lock acquisition timeout (configurable via `MAX_LOCK_WAIT`)
+- Circular dependency detection
+- Automatic deadlock resolution
+- Enhanced logging with dependency tracking
+
+For the full implementation, use the production script at `scripts/sequential-executor-v2.sh`.
+
 ```bash
+# The actual script includes deadlock detection. Here's the conceptual structure:
 cat > sequential-executor.sh << 'EOF'
 #!/usr/bin/env bash
-# sequential-executor.sh - Enforces sequential execution with logging
+# sequential-executor.sh - Enforces sequential execution with deadlock prevention
 
 set -euo pipefail
 
-# Deadlock prevention
+# Deadlock prevention - check if already inside executor
 if [ -n "${SEQUENTIAL_EXECUTOR_PID:-}" ]; then
     echo "[SEQUENTIAL] Already inside sequential executor (PID $SEQUENTIAL_EXECUTOR_PID), bypassing lock" >&2
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    exec "${SCRIPT_DIR}/wait_all.sh" -- "$@"
+    exec "$@"
 fi
 
 export SEQUENTIAL_EXECUTOR_PID=$$
@@ -996,11 +1005,16 @@ CHECK_INTERVAL=5          # Memory check interval (seconds)
 TIMEOUT=1800              # Command timeout (seconds)
 KILL_TIMEOUT=10           # Grace period before SIGKILL
 
+# Deadlock prevention (V2)
+MAX_LOCK_WAIT=300         # Max time to wait for lock (5 min default)
+LOCK_TIMEOUT=1800         # Max time to hold lock (30 min default)
+
 # Process limits
 MAX_PROCESSES=50          # Max concurrent processes
 
 # Execution control
 SEQUENTIAL_EXECUTOR_PID   # Set internally for deadlock prevention
+PRE_COMMIT_RUNNING        # Set when inside pre-commit execution
 PROJECT_SEQUENTIAL_MODE=1 # Enable sequential mode
 
 # Pre-commit specific
@@ -1042,5 +1056,11 @@ project/
 - name: Run Tests Sequentially
   run: ./scripts/seq uv run pytest
 ```
+
+## 📄 Related Documentation
+
+- **[DEADLOCK_PREVENTION_GUIDE.md](./DEADLOCK_PREVENTION_GUIDE.md)** - Comprehensive guide on deadlock prevention mechanisms
+- **[scripts/sequential-executor-v2.sh](./scripts/sequential-executor-v2.sh)** - The V2 executor with deadlock detection
+- **[scripts/pre-commit-safe.sh](./scripts/pre-commit-safe.sh)** - Pre-commit wrapper to prevent double-locking
 
 Remember: Every command execution is logged to `./logs/` - use this for debugging any issues!

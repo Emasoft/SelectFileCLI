@@ -1,8 +1,27 @@
 #!/usr/bin/env bash
 # git-safe.sh - Safe git wrapper that prevents concurrent git operations
 # This wrapper ensures only ONE git operation runs at a time
+#
+# Enhanced to handle pre-commit hooks and prevent deadlocks
 
 set -euo pipefail
+
+# Skip if already in a git hook to prevent deadlocks
+if [ -n "${GIT_DIR:-}" ] || [ -n "${GIT_WORK_TREE:-}" ]; then
+    # We're inside a git hook - execute directly
+    exec git "$@"
+fi
+
+# Skip if called from pre-commit
+if [ -n "${PRE_COMMIT_RUNNING:-}" ]; then
+    # Pre-commit is running - execute directly
+    exec git "$@"
+fi
+
+# Check if we're running a commit and set flag for pre-commit hooks
+if [[ "$1" == "commit" ]]; then
+    export PRE_COMMIT_RUNNING=1
+fi
 
 # Get project info
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
