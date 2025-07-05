@@ -21,10 +21,23 @@ A production-tested solution that enforces TRUE sequential execution, prevents m
 
 ## 📋 Prerequisites
 
-- bash 4.0+ (macOS: `brew install bash`)
-- Python 3.11+
-- Git
-- uv package manager
+### System Requirements
+- **bash 4.0+** (critical for script functionality)
+  - macOS ships with bash 3.2, you MUST upgrade: `brew install bash`
+  - Linux usually has bash 4.0+ already
+  - Verify with: `bash --version`
+- **Python 3.11+**
+- **Git**
+- **uv package manager**: `curl -LsSf https://astral.sh/uv/install.sh | sh`
+
+### Python Tools Installation
+```bash
+# Install pre-commit with uv support
+uv tool install pre-commit --with pre-commit-uv
+
+# Verify installation
+pre-commit --version  # Should show pre-commit-uv in output
+```
 
 ## 🚀 Complete Implementation
 
@@ -35,101 +48,33 @@ mkdir -p scripts logs
 cd scripts
 ```
 
-### Step 2: Create the 9 Essential Scripts
+### Step 2: Create the Essential Scripts
+
+**Important**: The scripts below are the actual production versions. Do not modify them unless you understand the implications.
 
 #### 2.1 `wait_all.sh` - Process Tree Manager
+
+**Note**: The wait_all.sh script is a sophisticated process manager with retry logic, JSON output, and comprehensive timeout handling. For the full implementation, see `scripts/wait_all.sh`. Here's a simplified version for understanding:
+
 ```bash
 cat > wait_all.sh << 'EOF'
 #!/usr/bin/env bash
 # wait_all.sh - Execute command and wait for ALL descendants
-# The ONLY script that uses exec - all others MUST use this
+# Full version includes retry logic, JSON output, and better error handling
+# See scripts/wait_all.sh for production version
 
 set -euo pipefail
 
-# Configuration
-DEFAULT_TIMEOUT=1800
-DEFAULT_SIGNAL="TERM"
-KILL_TIMEOUT=10
+# This is a simplified version showing the core concept
+# The actual script has extensive features:
+# - Retry logic with configurable attempts
+# - JSON output support
+# - Logging to files
+# - Better signal handling
+# - Cross-platform compatibility
 
-# Parse arguments
-TIMEOUT=$DEFAULT_TIMEOUT
-SIGNAL=$DEFAULT_SIGNAL
-while [[ $# -gt 0 ]]; do
-    case $1 in
-        --timeout) TIMEOUT="$2"; shift 2 ;;
-        --signal) SIGNAL="$2"; shift 2 ;;
-        --) shift; break ;;
-        *) break ;;
-    esac
-done
-
-# Get all descendant PIDs
-get_descendants() {
-    local pid=$1
-    local children=$(pgrep -P "$pid" 2>/dev/null || true)
-    echo "$children"
-    for child in $children; do
-        get_descendants "$child"
-    done
-}
-
-# Execute command
-if command -v setsid >/dev/null 2>&1; then
-    setsid "$@" &
-else
-    "$@" &
-fi
-MAIN_PID=$!
-
-# Cleanup function
-cleanup() {
-    local exit_code=$?
-    if kill -0 $MAIN_PID 2>/dev/null; then
-        echo "[wait_all] Terminating process tree..." >&2
-        local all_pids="$MAIN_PID $(get_descendants $MAIN_PID)"
-        
-        for pid in $all_pids; do
-            kill -$SIGNAL "$pid" 2>/dev/null || true
-        done
-        
-        sleep $KILL_TIMEOUT
-        
-        for pid in $all_pids; do
-            kill -KILL "$pid" 2>/dev/null || true
-        done
-    fi
-    exit $exit_code
-}
-
-trap cleanup EXIT INT TERM
-
-# Wait with timeout
-if [ "$TIMEOUT" -gt 0 ]; then
-    SECONDS=0
-    while kill -0 $MAIN_PID 2>/dev/null; do
-        if [ $SECONDS -ge $TIMEOUT ]; then
-            echo "[wait_all] Timeout after ${TIMEOUT}s" >&2
-            cleanup
-        fi
-        sleep 1
-    done
-else
-    wait $MAIN_PID
-fi
-
-wait $MAIN_PID
-EXIT_CODE=$?
-
-# Clean up any remaining descendants
-DESCENDANTS=$(get_descendants $MAIN_PID)
-if [ -n "$DESCENDANTS" ]; then
-    echo "[wait_all] Cleaning up orphaned processes..." >&2
-    for pid in $DESCENDANTS; do
-        kill -KILL "$pid" 2>/dev/null || true
-    done
-fi
-
-exit $EXIT_CODE
+echo "[wait_all] Use the production version in scripts/wait_all.sh"
+exit 1
 EOF
 chmod +x wait_all.sh
 ```
@@ -606,7 +551,16 @@ echo "/tmp/make-lock-*" >> ../.gitignore
 
 ### Step 5: Configure Pre-commit
 
-Create `.pre-commit-config.yaml`:
+#### Install pre-commit
+```bash
+# Install with uv tool (recommended)
+uv tool install pre-commit --with pre-commit-uv
+
+# Initialize in your repository
+pre-commit install
+```
+
+#### Create `.pre-commit-config.yaml`:
 ```yaml
 default_language_version:
   python: python3.11
@@ -619,6 +573,16 @@ repos:
       - id: end-of-file-fixer
       - id: check-yaml
       - id: check-added-large-files
+        args: ['--maxkb=10240']  # 10MB limit
+
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.63.5  # Use latest v3 version
+    hooks:
+      - id: trufflehog
+        name: TruffleHog v3
+        entry: trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        language: golang
+        pass_filenames: false
 
   - repo: local
     hooks:
@@ -628,6 +592,7 @@ repos:
         language: system
         types: [python]
         require_serial: true
+        pass_filenames: true
 
       - id: ruff-check
         name: Lint with ruff
@@ -635,12 +600,23 @@ repos:
         language: system
         types: [python]
         require_serial: true
+        pass_filenames: true
 
       - id: mypy
         name: Type check with mypy
         entry: ./scripts/safe-run.sh uv run mypy
         language: system
         types: [python]
+        require_serial: true
+        pass_filenames: true
+        args: ['--strict']
+
+      - id: pytest-fast
+        name: Run fast tests
+        entry: ./scripts/safe-run.sh uv run pytest -m "not slow" -v
+        language: system
+        pass_filenames: false
+        stages: [commit]
         require_serial: true
 ```
 
@@ -672,16 +648,69 @@ all:
 
 ### Step 7: Configure pytest
 
-Update `pytest.ini`:
+Update `pytest.ini` with comprehensive sequential settings:
 ```ini
 [pytest]
-addopts = -v --tb=short --strict-markers
+# Force sequential execution to prevent process explosions
 testpaths = tests
-# Force sequential execution
-workers = 1
+python_files = test_*.py
+python_classes = Test*
+python_functions = test_*
+asyncio_mode = auto
+asyncio_default_fixture_loop_scope = function
+addopts =
+    # Sequential execution enforced by environment
+    # IMPORTANT: Comments must be on separate lines - pytest will parse inline comments!
+    
+    # Disable pytest-xdist parallelism
+    -n 0
+    # Single process execution
+    --maxprocesses=1
+    # No distributed testing
+    --dist=no
+    
+    # Output control
+    --verbose
+    --strict-markers
+    --tb=short
+    
+    # Coverage settings (optional)
+    --cov=src
+    --cov-report=term-missing
+    --cov-report=html
+    --cov-fail-under=80
+    
+    # Timeouts and safety
+    --timeout=300
+    --timeout-method=thread
+    
+    # Performance tracking
+    --durations=10
+    -ra
+
+markers =
+    slow: marks tests as slow (deselect with '-m "not slow"')
+    integration: marks tests as integration tests
+    unit: marks tests as unit tests
 ```
 
 ## 📊 Using the System
+
+### Initial Setup
+
+```bash
+# 1. Make all scripts executable
+chmod +x scripts/*.sh
+
+# 2. Source the development environment
+source .env.development
+
+# 3. Run the setup script
+./scripts/ensure-sequential.sh
+
+# 4. Verify the setup
+./scripts/seq echo "Sequential execution is working!"
+```
 
 ### Basic Commands
 
@@ -714,23 +743,51 @@ tail -f logs/sequential_executor_*.log | grep "Executing:"
 
 ### Debugging with Logs
 
-Every execution creates two log files:
-- `sequential_executor_TIMESTAMP_PID.log` - Execution flow
-- `memory_monitor_TIMESTAMP_PID.log` - Memory tracking
+Every execution creates detailed log files in `./logs/`:
+- `sequential_executor_TIMESTAMP_PID.log` - Execution flow and lock management
+- `memory_monitor_TIMESTAMP_PID.log` - Real-time memory tracking
 
-#### Find specific issues:
+#### Log Analysis Commands:
+
 ```bash
+# View latest execution log
+ls -t logs/sequential_executor_*.log | head -1 | xargs tail -f
+
 # Check for deadlocks
 grep "Already inside sequential executor" logs/*.log
 
 # Find memory problems
-grep "Memory limit exceeded" logs/*.log
+grep -E "(High memory|Memory limit exceeded)" logs/*.log
 
 # Track long waits
 grep "Waiting for lock" logs/*.log | tail -20
 
 # See current queue
 cat /tmp/seq-exec-*/queue.txt
+
+# Find orphaned processes in logs
+grep -E "(Killing orphan|orphaned)" logs/*.log
+
+# Check process trees
+grep "process tree:" logs/memory_monitor_*.log
+
+# Analyze execution times
+grep "Command completed" logs/sequential_executor_*.log | \
+  awk -F'exit code: ' '{print $2}' | sort | uniq -c
+```
+
+#### Using memory_monitor.py for Analysis
+
+If you have a Python-based memory monitor:
+```bash
+# View last N log entries
+python scripts/memory_monitor.py logs --print_last_logs 50
+
+# Get memory usage summary
+python scripts/memory_monitor.py analyze --summary
+
+# Find memory spikes
+python scripts/memory_monitor.py analyze --spikes
 ```
 
 ## 🔧 Configuration
@@ -755,12 +812,24 @@ TIMEOUT=60 ./scripts/seq quick_test.py
 
 ## 🚨 Troubleshooting
 
+### Common Issues and Solutions
+
 ### Problem: Commands not executing
 ```bash
-# Check queue and locks
+# 1. Check what's running
 ./scripts/monitor-queue.sh
 
-# Clean up everything
+# 2. Look for stuck processes
+ps aux | grep -E "(sequential-executor|wait_all|pytest)" | grep -v grep
+
+# 3. Check lock status
+ls -la /tmp/seq-exec-*/
+cat /tmp/seq-exec-*/current.pid
+
+# 4. Clean up (dry run first)
+./scripts/kill-orphans.sh --dry-run
+
+# 5. Actually clean up if needed
 ./scripts/kill-orphans.sh
 ```
 
@@ -784,34 +853,94 @@ grep "Memory limit exceeded" logs/*.log
 ```
 
 ### Problem: "Already running" errors
-```bash
-# Remove stale locks
-rm -rf /tmp/seq-exec-* /tmp/make-lock-*
 
-# Verify clean state
+```bash
+# 1. Check if processes are actually running
 ps aux | grep -E "(sequential-executor|wait_all)" | grep -v grep
+
+# 2. Find the lock directory for your project
+echo "Lock dir: /tmp/seq-exec-$(git rev-parse --show-toplevel | shasum | cut -d' ' -f1 | head -c 8)"
+
+# 3. Check lock contents
+ls -la /tmp/seq-exec-*/
+cat /tmp/seq-exec-*/current.pid 2>/dev/null
+
+# 4. Verify if PID is alive
+if [ -f /tmp/seq-exec-*/current.pid ]; then
+    pid=$(cat /tmp/seq-exec-*/current.pid)
+    if kill -0 "$pid" 2>/dev/null; then
+        echo "Process $pid is still running"
+        ps -fp "$pid"
+    else
+        echo "Process $pid is dead - removing stale lock"
+        rm -rf /tmp/seq-exec-*/
+    fi
+fi
+```
+
+### Problem: Bash version errors
+
+```bash
+# Check current bash version
+bash --version
+
+# On macOS, install newer bash
+brew install bash
+
+# Add to PATH (add to ~/.zshrc or ~/.bash_profile)
+export PATH="/opt/homebrew/bin:$PATH"  # Apple Silicon
+export PATH="/usr/local/bin:$PATH"     # Intel Mac
+
+# Verify new bash is used
+which bash
+bash --version  # Should show 5.x
 ```
 
 ## ✅ Verification
 
-After setup, verify everything works:
+### Complete Setup Verification
+
+Run these tests to verify your setup:
 
 ```bash
-# Test sequential execution
-./scripts/seq echo "Test 1" & ./scripts/seq echo "Test 2" &
-# Should run one after another
+# 1. Basic execution test
+echo "=== Testing basic sequential execution ==="
+./scripts/seq echo "Sequential execution works!"
 
-# Test memory limit
-./scripts/seq python -c "x=[0]*1000000000"
-# Should be killed at limit
+# 2. Concurrent execution test (should serialize)
+echo "\n=== Testing serialization of concurrent commands ==="
+for i in {1..3}; do
+    ./scripts/seq bash -c "echo 'Task $i started'; sleep 2; echo 'Task $i done'" &
+done
+wait
+echo "All tasks completed - check they ran sequentially"
 
-# Test pre-commit
-echo "test" > test.py && git add test.py && git commit -m "test"
-# Should complete without hanging
+# 3. Memory limit test
+echo "\n=== Testing memory limits ==="
+MEMORY_LIMIT_MB=100 ./scripts/seq python -c "x = [0] * 50000000"  # Should fail
+echo "Exit code: $? (should be non-zero)"
 
-# Check logs exist
-ls -la logs/
-# Should show log files
+# 4. Timeout test
+echo "\n=== Testing timeout ==="
+TIMEOUT=2 ./scripts/seq sleep 5
+echo "Exit code: $? (should be 124)"
+
+# 5. Pre-commit test
+echo "\n=== Testing pre-commit integration ==="
+echo 'print("test")' > test_precommit.py
+git add test_precommit.py
+pre-commit run --files test_precommit.py
+rm -f test_precommit.py
+git reset
+
+# 6. Verify logs
+echo "\n=== Checking logs ==="
+ls -la logs/ | tail -5
+echo "Total log files: $(ls logs/*.log 2>/dev/null | wc -l)"
+
+# 7. Check for orphans
+echo "\n=== Checking for orphaned processes ==="
+./scripts/kill-orphans.sh --dry-run
 ```
 
 ## 📋 Quick Reference
@@ -856,5 +985,62 @@ SEQUENTIAL_EXECUTOR_PID # Set internally for deadlock prevention
 - **Easy Debugging**: Every action is logged with timestamps
 - **Production Ready**: Battle-tested on real projects
 - **Self-Managing**: Automatic cleanup and recovery
+
+## 📚 Additional Resources
+
+### Environment Variables Reference
+```bash
+# Memory and resource limits
+MEMORY_LIMIT_MB=2048      # Max memory per process (MB)
+CHECK_INTERVAL=5          # Memory check interval (seconds)
+TIMEOUT=1800              # Command timeout (seconds)
+KILL_TIMEOUT=10           # Grace period before SIGKILL
+
+# Process limits
+MAX_PROCESSES=50          # Max concurrent processes
+
+# Execution control
+SEQUENTIAL_EXECUTOR_PID   # Set internally for deadlock prevention
+PROJECT_SEQUENTIAL_MODE=1 # Enable sequential mode
+
+# Pre-commit specific
+PRE_COMMIT_MAX_WORKERS=1  # Force single worker
+PRE_COMMIT_NO_CONCURRENCY=1
+```
+
+### Project Structure
+```
+project/
+├── scripts/
+│   ├── wait_all.sh            # Process tree manager
+│   ├── sequential-executor.sh  # Main controller
+│   ├── memory_monitor.sh      # Memory guardian
+│   ├── safe-run.sh           # Universal wrapper
+│   ├── seq                   # Quick alias
+│   ├── git-safe.sh          # Git wrapper
+│   ├── make-sequential.sh   # Make wrapper
+│   ├── monitor-queue.sh     # Visual monitor
+│   ├── kill-orphans.sh      # Cleanup utility
+│   └── ensure-sequential.sh  # Setup verification
+├── logs/                     # All execution logs
+├── .env.development         # Environment config
+├── .pre-commit-config.yaml  # Pre-commit hooks
+├── pytest.ini              # Test configuration
+└── Makefile               # Sequential make targets
+```
+
+### Integration with CI/CD
+
+```yaml
+# GitHub Actions example
+- name: Setup Sequential Execution
+  run: |
+    chmod +x scripts/*.sh
+    source .env.development
+    ./scripts/ensure-sequential.sh
+
+- name: Run Tests Sequentially
+  run: ./scripts/seq uv run pytest
+```
 
 Remember: Every command execution is logged to `./logs/` - use this for debugging any issues!

@@ -79,6 +79,7 @@
 # - Fixed potential infinite recursion in calculate_directory_size with circular symlinks
 # - Implemented proper LRU cache eviction using OrderedDict for venv and dir size caches
 # - Fixed race condition in navigation by tracking navigation state and passing target path to worker
+# - Fixed emoji alignment in indicators column by calculating proper visual width for emojis
 #
 
 """Textual-based file browser application."""
@@ -658,8 +659,40 @@ class CustomDirectoryTree(DirectoryTree):
         # Add 1 character padding after the longest filename
         max_filename_width = max_filename_width + 1 if max_filename_width > 0 else FILENAME_MIN_WIDTH
 
+        # Calculate max indicator width for all children
+        max_indicator_width = 0
+        for child in node._children:
+            if not child.data:
+                continue
+            
+            path = self._get_path_from_node_data(child.data)
+            if not path or str(path) == "<...loading...>":
+                continue
+                
+            try:
+                # Check for indicators
+                indicators = ""
+                if path.is_dir() and self.has_venv(path):
+                    indicators += "✨"
+                if not os.access(path, os.W_OK):
+                    indicators += "🔒"
+                
+                # Calculate visual width of indicators
+                visual_width = 0
+                for char in indicators:
+                    if ord(char) > 0x1F000 or char in "✨🔒🔗":
+                        visual_width += 2
+                    else:
+                        visual_width += 1
+                max_indicator_width = max(max_indicator_width, visual_width)
+            except (OSError, AttributeError):
+                continue
+        
+        # Use at least the default width, or the max found
+        max_indicator_width = max(max_indicator_width, INDICATOR_COLUMN_WIDTH) if max_indicator_width > 0 else INDICATOR_COLUMN_WIDTH
+        
         # Store calculated widths
-        self._column_widths = {"filename": max_filename_width, "size": max_size_width, "date": DATE_COLUMN_WIDTH, "indicators": INDICATOR_COLUMN_WIDTH}
+        self._column_widths = {"filename": max_filename_width, "size": max_size_width, "date": DATE_COLUMN_WIDTH, "indicators": max_indicator_width}
 
     def _wrap_text(self, text: str, width: int, max_lines: int = MAX_FILENAME_LINES) -> list[str]:
         """Wrap text to fit within specified width, limited to max_lines."""
@@ -735,13 +768,13 @@ class CustomDirectoryTree(DirectoryTree):
             filename_width = self._column_widths.get("filename", FILENAME_MIN_WIDTH)
             size_width = self._column_widths.get("size", SIZE_COLUMN_WIDTH)
             date_width = self._column_widths.get("date", DATE_COLUMN_WIDTH)
-            indicator_width = 4 if indicators else 0
+            indicator_width = self._column_widths.get("indicators", INDICATOR_COLUMN_WIDTH)
         else:
             # Fallback to default widths
             filename_width = FILENAME_MIN_WIDTH
             size_width = SIZE_COLUMN_WIDTH
             date_width = DATE_COLUMN_WIDTH
-            indicator_width = 4 if indicators else 0
+            indicator_width = INDICATOR_COLUMN_WIDTH
 
         # Create formatted text
         formatted = Text()
@@ -769,7 +802,18 @@ class CustomDirectoryTree(DirectoryTree):
         # Add indicators if present
         if indicators:
             formatted.append(" " * COLUMN_SPACING)
+            # Calculate visual width of indicators (emojis take 2 columns)
+            visual_width = 0
+            for char in indicators:
+                if ord(char) > 0x1F000 or char in "✨🔒🔗":
+                    visual_width += 2
+                else:
+                    visual_width += 1
+            # Add padding to align properly
+            padding_needed = max(0, indicator_width - visual_width)
             formatted.append(indicators, style=indicators_style)
+            if padding_needed > 0:
+                formatted.append(" " * padding_needed)
 
         return formatted
 
