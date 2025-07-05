@@ -27,7 +27,7 @@ This prevents the deadlock scenario where multiple operations bypass sequential 
 ### 1. Multiple Git Operations Deadlock Prevention
 **Problem**: Multiple git commands spawned concurrently (e.g., from background execution) each trigger pre-commit hooks, which correctly queue in the sequential executor, causing indefinite wait.
 
-**Solution**: 
+**Solution**:
 - ALL git hooks must use `wait_all.sh` for EVERY command
 - Create git-safe wrapper for manual git operations
 - Add concurrent operation detection in hooks
@@ -61,6 +61,15 @@ This prevents the deadlock scenario where multiple operations bypass sequential 
 3. **Background command cleanup** - Avoid spawning background shells that create orphans
 4. **No exec commands** - ALL scripts use wait_all.sh except wait_all.sh itself
 
+### 6. Pre-commit Deadlock Prevention
+**Problem**: Pre-commit hooks that use sequential executor create deadlocks when pre-commit itself runs through the sequential executor.
+
+**Solution**: Detect nested sequential executor calls using environment variable:
+- Sequential executor sets `SEQUENTIAL_EXECUTOR_PID=$$`
+- Nested calls detect this variable and bypass locking
+- Prevents deadlock when pre-commit runs hooks like TruffleHog
+- Maintains single-process guarantee for top-level commands
+
 ## Critical Safety Measures
 
 1. **Sequential Executor**: Only ONE process runs at a time - guaranteed by lock mechanism
@@ -73,6 +82,7 @@ This prevents the deadlock scenario where multiple operations bypass sequential 
 8. **Memory Monitor**: Kills processes exceeding 2GB limit - prevents system lockup
 9. **Make Sequential**: Global lock prevents concurrent make commands
 10. **Project Isolation**: All locks/queues use project hash - multiple projects OK
+11. **Deadlock Prevention**: Nested sequential executor calls bypass locking - no circular waits
 
 ## Prerequisites
 
@@ -396,6 +406,23 @@ Create `scripts/sequential-executor.sh`:
 
 set -euo pipefail
 
+# Check if we're already inside a sequential executor to prevent deadlocks
+if [ -n "${SEQUENTIAL_EXECUTOR_PID:-}" ]; then
+    # We're already inside a sequential executor, bypass locking
+    echo "[SEQUENTIAL] Already inside sequential executor (PID $SEQUENTIAL_EXECUTOR_PID), bypassing lock" >&2
+    # Execute command directly using wait_all.sh
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    WAIT_ALL="${SCRIPT_DIR}/wait_all.sh"
+    if [ -x "$WAIT_ALL" ]; then
+        exec "$WAIT_ALL" -- "$@"
+    else
+        exec "$@"
+    fi
+fi
+
+# Set environment variable to detect nested calls
+export SEQUENTIAL_EXECUTOR_PID=$$
+
 # Check bash version (require 4.0+)
 if [ "${BASH_VERSION%%.*}" -lt 4 ]; then
     echo "ERROR: This script requires bash 4.0 or higher" >&2
@@ -420,6 +447,11 @@ ORPHAN_LOG="${LOCK_DIR}/orphans.log"
 # Ensure lock directory exists
 mkdir -p "$LOCK_DIR"
 
+# Create logs directory and timestamped log file
+LOGS_DIR="${PROJECT_ROOT}/logs"
+mkdir -p "$LOGS_DIR"
+EXEC_LOG="${LOGS_DIR}/sequential_executor_$(date '+%Y%m%d_%H%M%S')_$$.log"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -427,21 +459,29 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Logging functions
+# Logging functions - write to both stdout/stderr and log file
 log_info() {
-    echo -e "${GREEN}[SEQUENTIAL]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg="[SEQUENTIAL] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${GREEN}${msg}${NC}"
+    echo "${msg}" >> "$EXEC_LOG"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARNING]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
+    local msg="[WARNING] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${YELLOW}${msg}${NC}" >&2
+    echo "WARNING: ${msg}" >> "$EXEC_LOG"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
+    local msg="[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${RED}${msg}${NC}" >&2
+    echo "ERROR: ${msg}" >> "$EXEC_LOG"
 }
 
 log_queue() {
-    echo -e "${BLUE}[QUEUE]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg="[QUEUE] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${BLUE}${msg}${NC}"
+    echo "${msg}" >> "$EXEC_LOG"
 }
 
 # Get all child processes recursively
@@ -597,6 +637,9 @@ cleanup() {
     # Final orphan check on exit
     kill_orphans
 
+    # Note log location
+    echo "Sequential executor log saved to: $EXEC_LOG" >&2
+
     exit $exit_code
 }
 
@@ -608,17 +651,17 @@ check_git_operations() {
     if [[ "$1" == "git" ]] || [[ "$*" == *"git "* ]]; then
         # Check for other git processes
         local git_count=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null | grep -v $$ | wc -l || echo 0)
-        
+
         if [ "$git_count" -gt 0 ]; then
             log_warn "Other git operations detected:"
             ps aux | grep -E "git (commit|merge|rebase|cherry-pick|push|pull)" | grep -v grep | grep -v $$ | while read line; do
                 log_warn "  $line"
             done
-            
+
             # Special handling for git operations
             log_warn "Multiple git operations can cause conflicts!"
             log_info "Waiting for other git operations to complete..."
-            
+
             # Wait up to 10 seconds for git operations to complete
             local wait_time=0
             while [ "$wait_time" -lt 10 ]; do
@@ -630,7 +673,7 @@ check_git_operations() {
                 sleep 1
                 wait_time=$((wait_time + 1))
             done
-            
+
             if [ "$git_count" -gt 0 ]; then
                 log_error "Git operations still running after 10s wait"
                 log_error "To prevent corruption, aborting this operation"
@@ -638,7 +681,7 @@ check_git_operations() {
                 return 1
             fi
         fi
-        
+
         # Check for git index lock
         if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
             log_error "Git index is locked - another git process may be running"
@@ -652,6 +695,8 @@ check_git_operations() {
 
 # Main execution starts here
 log_info "Sequential executor starting for: $*"
+log_info "Project: $PROJECT_ROOT"
+log_info "Log file: $EXEC_LOG"
 
 # Step 0: Check for git operation conflicts
 if ! check_git_operations "$@"; then
@@ -884,7 +929,7 @@ mkdir -p "$GIT_LOCK_DIR"
 check_existing_git_operations() {
     # Check for any running git processes
     local git_procs=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null || true)
-    
+
     if [ -n "$git_procs" ]; then
         echo -e "${RED}ERROR: Git operations already in progress:${NC}" >&2
         for pid in $git_procs; do
@@ -893,20 +938,20 @@ check_existing_git_operations() {
         done
         return 1
     fi
-    
+
     # Check for git lock files
     if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
         echo -e "${RED}ERROR: Git index lock exists - another git process may be running${NC}" >&2
         echo -e "${YELLOW}To force remove: rm -f $PROJECT_ROOT/.git/index.lock${NC}" >&2
         return 1
     fi
-    
+
     # Check for our own lock
     if [ -d "$GIT_LOCKFILE" ]; then
         if [ -f "$GIT_OPERATION_FILE" ]; then
             local current_op=$(cat "$GIT_OPERATION_FILE" 2>/dev/null || echo "unknown")
             local pid=$(echo "$current_op" | cut -d: -f1)
-            
+
             # Check if the process is still alive
             if kill -0 "$pid" 2>/dev/null; then
                 echo -e "${RED}ERROR: Git operation already in progress:${NC}" >&2
@@ -919,7 +964,7 @@ check_existing_git_operations() {
             fi
         fi
     fi
-    
+
     return 0
 }
 
@@ -927,21 +972,21 @@ check_existing_git_operations() {
 acquire_git_lock() {
     local max_wait=30  # Maximum 30 seconds wait
     local waited=0
-    
+
     while ! mkdir "$GIT_LOCKFILE" 2>/dev/null; do
         if [ "$waited" -ge "$max_wait" ]; then
             echo -e "${RED}ERROR: Could not acquire git lock after ${max_wait}s${NC}" >&2
             return 1
         fi
-        
+
         if [ "$waited" -eq 0 ]; then
             echo -e "${YELLOW}Waiting for git lock...${NC}" >&2
         fi
-        
+
         sleep 1
         waited=$((waited + 1))
     done
-    
+
     # Record current operation
     echo "$$:$(date '+%Y-%m-%d %H:%M:%S'):git $*" > "$GIT_OPERATION_FILE"
     return 0
@@ -1045,18 +1090,18 @@ fi
 HOOKS_DIR="$PROJECT_ROOT/.git/hooks"
 if [ -d "$HOOKS_DIR" ]; then
     echo -e "${YELLOW}Installing/updating git hooks with safety checks...${NC}"
-    
+
     # Function to create hook with standard header
     create_hook() {
         local hook_name=$1
         local hook_path="$HOOKS_DIR/$hook_name"
-        
+
         # Backup existing hook if it exists and isn't ours
         if [ -f "$hook_path" ] && ! grep -q "Sequential execution safety" "$hook_path" 2>/dev/null; then
             echo -e "${YELLOW}Backing up existing $hook_name hook to ${hook_name}.backup${NC}"
             mv "$hook_path" "${hook_path}.backup"
         fi
-        
+
         # Copy our enhanced hooks
         case "$hook_name" in
             pre-commit)
@@ -1115,15 +1160,15 @@ exit 0
 EOF
                 ;;
         esac
-        
+
         chmod +x "$hook_path"
     }
-    
+
     # Install all safety hooks
     for hook in pre-commit pre-push commit-msg; do
         create_hook "$hook"
     done
-    
+
     echo -e "${GREEN}✓ Git hooks updated with safety checks${NC}"
 fi
 
@@ -1232,29 +1277,44 @@ MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-2048}  # 2GB default
 CHECK_INTERVAL=${CHECK_INTERVAL:-5}       # Check every 5 seconds
 MONITOR_PID_FILE="/tmp/memory_monitor_$$.pid"
 
+# Get project root and create logs directory
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+LOGS_DIR="${PROJECT_ROOT}/logs"
+mkdir -p "$LOGS_DIR"
+
+# Create timestamped log file
+LOG_FILE="${LOGS_DIR}/memory_monitor_$(date '+%Y%m%d_%H%M%S')_$$.log"
+
 # Colors
 RED='\033[0;31m'
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
 NC='\033[0m'
 
-# Log functions
+# Log functions - write to both stdout/stderr and log file
 log_info() {
-    echo -e "${GREEN}[MEMORY-MONITOR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${GREEN}${msg}${NC}"
+    echo "${msg}" >> "$LOG_FILE"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[MEMORY-MONITOR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
+    local msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${YELLOW}${msg}${NC}" >&2
+    echo "WARNING: ${msg}" >> "$LOG_FILE"
 }
 
 log_error() {
-    echo -e "${RED}[MEMORY-MONITOR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
+    local msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${RED}${msg}${NC}" >&2
+    echo "ERROR: ${msg}" >> "$LOG_FILE"
 }
 
 # Cleanup on exit
 cleanup() {
     rm -f "$MONITOR_PID_FILE"
     log_info "Memory monitor stopped"
+    echo "Log saved to: $LOG_FILE" >&2
 }
 trap cleanup EXIT
 
@@ -1277,13 +1337,13 @@ get_memory_mb() {
 get_descendants() {
     local parent_pid=$1
     local children=""
-    
+
     if command -v pgrep >/dev/null 2>&1; then
         children=$(pgrep -P "$parent_pid" 2>/dev/null || true)
     else
         children=$(ps --ppid "$parent_pid" -o pid= 2>/dev/null || true)
     fi
-    
+
     for child in $children; do
         echo "$child"
         get_descendants "$child"
@@ -1294,12 +1354,12 @@ get_descendants() {
 kill_process_tree() {
     local pid=$1
     local reason=$2
-    
+
     log_warn "Killing process tree for PID $pid: $reason"
-    
+
     # Get all descendants
     local all_pids="$pid $(get_descendants "$pid")"
-    
+
     # Kill in reverse order (children first)
     for p in $(echo "$all_pids" | tr ' ' '\n' | tac); do
         if kill -0 "$p" 2>/dev/null; then
@@ -1307,10 +1367,10 @@ kill_process_tree() {
             kill -TERM "$p" 2>/dev/null || true
         fi
     done
-    
+
     # Give processes time to terminate
     sleep 2
-    
+
     # Force kill any remaining
     for p in $(echo "$all_pids" | tr ' ' '\n' | tac); do
         if kill -0 "$p" 2>/dev/null; then
@@ -1324,17 +1384,45 @@ kill_process_tree() {
 monitor_processes() {
     local parent_pid=${1:-$$}
     log_info "Starting memory monitor for PID $parent_pid (limit: ${MEMORY_LIMIT_MB}MB)"
+    log_info "Project: $PROJECT_ROOT"
+    log_info "Log file: $LOG_FILE"
     
+    # Log initial process tree
+    log_info "Initial process tree:"
+    local all_pids="$parent_pid $(get_descendants "$parent_pid")"
+    for pid in $all_pids; do
+        if kill -0 "$pid" 2>/dev/null; then
+            local cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+            local mem_mb=$(get_memory_mb "$pid")
+            log_info "  PID $pid: $cmd (${mem_mb}MB)"
+        fi
+    done
+    
+    local check_count=0
     while kill -0 "$parent_pid" 2>/dev/null; do
+        ((check_count++))
+        
         # Get parent and all child processes
         local all_pids="$parent_pid $(get_descendants "$parent_pid")"
+        local total_mem=0
+        local process_count=0
+        
+        # Log periodic status every 10 checks
+        if (( check_count % 10 == 0 )); then
+            log_info "Status check #$check_count:"
+        fi
         
         for pid in $all_pids; do
             if kill -0 "$pid" 2>/dev/null; then
                 local mem_mb=$(get_memory_mb "$pid")
                 local cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
+                ((total_mem += mem_mb))
+                ((process_count++))
                 
-                # Log high memory usage
+                # Always log to file, but only to console if high usage
+                echo "  PID $pid: $cmd = ${mem_mb}MB" >> "$LOG_FILE"
+                
+                # Log high memory usage to console
                 if (( mem_mb > MEMORY_LIMIT_MB / 2 )); then
                     log_warn "High memory usage: PID $pid ($cmd) using ${mem_mb}MB"
                 fi
@@ -1345,6 +1433,11 @@ monitor_processes() {
                 fi
             fi
         done
+        
+        # Log summary every 10 checks
+        if (( check_count % 10 == 0 )); then
+            log_info "Total: $process_count processes using ${total_mem}MB"
+        fi
         
         sleep "$CHECK_INTERVAL"
     done
@@ -1433,7 +1526,7 @@ cleanup() {
         grep -v "^$$:" "$MAKE_QUEUE" > "${MAKE_QUEUE}.tmp" 2>/dev/null || true
         mv -f "${MAKE_QUEUE}.tmp" "$MAKE_QUEUE" 2>/dev/null || true
     fi
-    
+
     # Release lock if we hold it
     if [ -d "$MAKE_LOCK" ]; then
         local lock_pid=$(cat "$MAKE_LOCK/pid" 2>/dev/null || echo 0)
@@ -1449,14 +1542,14 @@ trap cleanup EXIT
 acquire_lock() {
     local max_wait=300  # 5 minutes max wait
     local waited=0
-    
+
     while true; do
         # Try to create lock directory
         if mkdir "$MAKE_LOCK" 2>/dev/null; then
             echo $$ > "$MAKE_LOCK/pid"
             return 0
         fi
-        
+
         # Check if lock holder is still alive
         local lock_pid=$(cat "$MAKE_LOCK/pid" 2>/dev/null || echo 0)
         if ! kill -0 "$lock_pid" 2>/dev/null; then
@@ -1465,13 +1558,13 @@ acquire_lock() {
             rmdir "$MAKE_LOCK" 2>/dev/null || true
             continue
         fi
-        
+
         # Add to queue if not already there
         if ! grep -q "^$$:" "$MAKE_QUEUE" 2>/dev/null; then
             echo "$$:$*" >> "$MAKE_QUEUE"
             log_info "Added to queue (PID $$): make $*"
         fi
-        
+
         # Show status every 10 seconds
         if (( waited % 10 == 0 )); then
             log_info "Waiting for make lock (held by PID $lock_pid)..."
@@ -1480,10 +1573,10 @@ acquire_lock() {
                 log_info "Queue size: $queue_size"
             fi
         fi
-        
+
         sleep 1
         ((waited++))
-        
+
         if (( waited > max_wait )); then
             log_error "Timeout waiting for make lock"
             exit 1
@@ -2538,6 +2631,18 @@ make monitor
 
 The memory monitor is automatically integrated into the sequential executor, but you can also use it standalone for debugging.
 
+#### Log Files Location
+
+All execution logs are saved in the `./logs` directory with timestamps:
+- **Memory Monitor Logs**: `./logs/memory_monitor_YYYYMMDD_HHMMSS_PID.log`
+- **Sequential Executor Logs**: `./logs/sequential_executor_YYYYMMDD_HHMMSS_PID.log`
+
+These logs are written in real-time and contain:
+- Process trees with PIDs and memory usage
+- Memory warnings when processes exceed 50% of limit
+- Process termination events
+- Periodic status summaries every 50 seconds
+
 #### Automatic Setup (Recommended)
 When using the sequential pipeline, memory monitoring starts automatically:
 ```bash
@@ -2558,6 +2663,50 @@ Run the memory monitor standalone to debug specific processes:
 
 # Monitor with verbose output
 MEMORY_LIMIT_MB=512 ./scripts/memory_monitor.sh --pid $$ --interval 1
+```
+
+### Viewing and Analyzing Logs
+
+#### Real-time Log Monitoring
+```bash
+# Watch memory monitor log in real-time
+tail -f logs/memory_monitor_*.log
+
+# Watch sequential executor log
+tail -f logs/sequential_executor_*.log
+
+# Watch both logs simultaneously
+tail -f logs/*.log
+```
+
+#### Finding Recent Logs
+```bash
+# List all logs sorted by date
+ls -lt logs/
+
+# View the most recent memory monitor log
+less $(ls -t logs/memory_monitor_*.log | head -1)
+
+# View the most recent sequential executor log
+less $(ls -t logs/sequential_executor_*.log | head -1)
+
+# Search for high memory warnings across all logs
+grep -h "High memory usage" logs/*.log
+
+# Find processes that were killed
+grep -h "Memory limit exceeded" logs/*.log
+```
+
+#### Analyzing Memory Patterns
+```bash
+# Extract memory usage for specific PID
+grep "PID 12345" logs/memory_monitor_*.log
+
+# Show memory summaries
+grep "Total:" logs/memory_monitor_*.log
+
+# Find peak memory usage
+grep -h "MB" logs/memory_monitor_*.log | sort -t= -k2 -nr | head -20
 ```
 
 ### Debugging Memory Issues Step-by-Step
@@ -2618,7 +2767,7 @@ EOF
 echo "Testing 512MB limit..."
 MEMORY_LIMIT_MB=512 ./scripts/seq python memory_stress.py
 
-echo "Testing 1GB limit..."  
+echo "Testing 1GB limit..."
 MEMORY_LIMIT_MB=1024 ./scripts/seq python memory_stress.py
 ```
 
@@ -2683,10 +2832,10 @@ chmod +x monitor_leak.sh
    ```bash
    # Development debugging
    export MEMORY_LIMIT_MB=512
-   
+
    # Testing
    export MEMORY_LIMIT_MB=1024
-   
+
    # Production
    export MEMORY_LIMIT_MB=2048
    ```
@@ -2695,7 +2844,7 @@ chmod +x monitor_leak.sh
    ```bash
    # Light tasks (linting, simple tests)
    MEMORY_LIMIT_MB=512 make lint
-   
+
    # Heavy tasks (integration tests, builds)
    MEMORY_LIMIT_MB=4096 make test
    ```
@@ -2712,10 +2861,10 @@ chmod +x monitor_leak.sh
    ```bash
    # Terminal 1: Run monitor
    ./scripts/monitor-queue.sh
-   
+
    # Terminal 2: Run tests
    make test
-   
+
    # Watch memory usage in real-time in Terminal 1
    ```
 
@@ -2877,9 +3026,9 @@ PROJECT_HASH=$(pwd | shasum | cut -d' ' -f1 | head -c 8)
 rm -rf /tmp/seq-exec-${PROJECT_HASH}/executor.lock
 ```
 
-#### 6. Multiple git operations stuck waiting  
-**Problem**: Running multiple git commands bypasses sequential control at entry point  
-**Root Cause**: Each `git commit` triggers pre-commit hook → sequential executor → all wait for lock  
+#### 6. Multiple git operations stuck waiting
+**Problem**: Running multiple git commands bypasses sequential control at entry point
+**Root Cause**: Each `git commit` triggers pre-commit hook → sequential executor → all wait for lock
 **Why it happens**:
 - Commands run from outside the sequential system (e.g., Claude's background execution)
 - Each git command is a new entry point that triggers the hook
@@ -2897,7 +3046,7 @@ export MEMORY_LIMIT_MB=4096  # 4GB limit
 **Problem**: Running `make test` and `make lint` concurrently spawns duplicate sequential executors
 **Solution**: Use make-sequential.sh wrapper or MAKE_SEQ variable in Makefile
 
-#### 9. Process killed unexpectedly 
+#### 9. Process killed unexpectedly
 **Problem**: Process terminated with "Killed" message
 **Diagnosis**: Check if memory monitor killed it
 ```bash
@@ -3044,7 +3193,7 @@ This guide provides a **complete, tested solution** for preventing process explo
 8. **Cross-platform Support** - Works on Linux, macOS, and BSD
 9. **Emergency Recovery** - Clear procedures for stuck processes
 
-**The most critical lessons learned**: 
+**The most critical lessons learned**:
 1. Multiple git operations can bypass sequential control at the entry point, causing deadlocks
 2. Multiple make commands can spawn duplicate sequential executors
 3. Runaway processes can consume all system memory without limits

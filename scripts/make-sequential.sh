@@ -41,7 +41,7 @@ cleanup() {
         grep -v "^$$:" "$MAKE_QUEUE" > "${MAKE_QUEUE}.tmp" 2>/dev/null || true
         mv -f "${MAKE_QUEUE}.tmp" "$MAKE_QUEUE" 2>/dev/null || true
     fi
-    
+
     # Release lock if we hold it
     if [ -d "$MAKE_LOCK" ]; then
         local lock_pid=$(cat "$MAKE_LOCK/pid" 2>/dev/null || echo 0)
@@ -57,14 +57,14 @@ trap cleanup EXIT
 acquire_lock() {
     local max_wait=300  # 5 minutes max wait
     local waited=0
-    
+
     while true; do
         # Try to create lock directory
         if mkdir "$MAKE_LOCK" 2>/dev/null; then
             echo $$ > "$MAKE_LOCK/pid"
             return 0
         fi
-        
+
         # Check if lock holder is still alive
         local lock_pid=$(cat "$MAKE_LOCK/pid" 2>/dev/null || echo 0)
         if ! kill -0 "$lock_pid" 2>/dev/null; then
@@ -73,13 +73,13 @@ acquire_lock() {
             rmdir "$MAKE_LOCK" 2>/dev/null || true
             continue
         fi
-        
+
         # Add to queue if not already there
         if ! grep -q "^$$:" "$MAKE_QUEUE" 2>/dev/null; then
             echo "$$:$*" >> "$MAKE_QUEUE"
             log_info "Added to queue (PID $$): make $*"
         fi
-        
+
         # Show status every 10 seconds
         if (( waited % 10 == 0 )); then
             log_info "Waiting for make lock (held by PID $lock_pid)..."
@@ -88,10 +88,10 @@ acquire_lock() {
                 log_info "Queue size: $queue_size"
             fi
         fi
-        
+
         sleep 1
         ((waited++))
-        
+
         if (( waited > max_wait )); then
             log_error "Timeout waiting for make lock"
             exit 1

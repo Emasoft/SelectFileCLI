@@ -9,6 +9,23 @@
 
 set -euo pipefail
 
+# Check if we're already inside a sequential executor to prevent deadlocks
+if [ -n "${SEQUENTIAL_EXECUTOR_PID:-}" ]; then
+    # We're already inside a sequential executor, bypass locking
+    echo "[SEQUENTIAL] Already inside sequential executor (PID $SEQUENTIAL_EXECUTOR_PID), bypassing lock" >&2
+    # Execute command directly using wait_all.sh
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    WAIT_ALL="${SCRIPT_DIR}/wait_all.sh"
+    if [ -x "$WAIT_ALL" ]; then
+        exec "$WAIT_ALL" -- "$@"
+    else
+        exec "$@"
+    fi
+fi
+
+# Set environment variable to detect nested calls
+export SEQUENTIAL_EXECUTOR_PID=$$
+
 # Check bash version (require 4.0+)
 if [ "${BASH_VERSION%%.*}" -lt 4 ]; then
     echo "ERROR: This script requires bash 4.0 or higher" >&2
@@ -33,6 +50,11 @@ ORPHAN_LOG="${LOCK_DIR}/orphans.log"
 # Ensure lock directory exists
 mkdir -p "$LOCK_DIR"
 
+# Create logs directory and timestamped log file
+LOGS_DIR="${PROJECT_ROOT}/logs"
+mkdir -p "$LOGS_DIR"
+EXEC_LOG="${LOGS_DIR}/sequential_executor_$(date '+%Y%m%d_%H%M%S')_$$.log"
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -40,21 +62,29 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-# Logging functions
+# Logging functions - write to both stdout/stderr and log file
 log_info() {
-    echo -e "${GREEN}[SEQUENTIAL]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg="[SEQUENTIAL] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${GREEN}${msg}${NC}"
+    echo "${msg}" >> "$EXEC_LOG"
 }
 
 log_warn() {
-    echo -e "${YELLOW}[WARNING]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
+    local msg="[WARNING] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${YELLOW}${msg}${NC}" >&2
+    echo "WARNING: ${msg}" >> "$EXEC_LOG"
 }
 
 log_error() {
-    echo -e "${RED}[ERROR]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*" >&2
+    local msg="[ERROR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${RED}${msg}${NC}" >&2
+    echo "ERROR: ${msg}" >> "$EXEC_LOG"
 }
 
 log_queue() {
-    echo -e "${BLUE}[QUEUE]${NC} $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg="[QUEUE] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    echo -e "${BLUE}${msg}${NC}"
+    echo "${msg}" >> "$EXEC_LOG"
 }
 
 # Get all child processes recursively
@@ -210,6 +240,9 @@ cleanup() {
     # Final orphan check on exit
     kill_orphans
 
+    # Note log location
+    echo "Sequential executor log saved to: $EXEC_LOG" >&2
+
     exit $exit_code
 }
 
@@ -221,17 +254,17 @@ check_git_operations() {
     if [[ "$1" == "git" ]] || [[ "$*" == *"git "* ]]; then
         # Check for other git processes
         local git_count=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null | grep -v $$ | wc -l || echo 0)
-        
+
         if [ "$git_count" -gt 0 ]; then
             log_warn "Other git operations detected:"
             ps aux | grep -E "git (commit|merge|rebase|cherry-pick|push|pull)" | grep -v grep | grep -v $$ | while read line; do
                 log_warn "  $line"
             done
-            
+
             # Special handling for git operations
             log_warn "Multiple git operations can cause conflicts!"
             log_info "Waiting for other git operations to complete..."
-            
+
             # Wait up to 10 seconds for git operations to complete
             local wait_time=0
             while [ "$wait_time" -lt 10 ]; do
@@ -243,7 +276,7 @@ check_git_operations() {
                 sleep 1
                 wait_time=$((wait_time + 1))
             done
-            
+
             if [ "$git_count" -gt 0 ]; then
                 log_error "Git operations still running after 10s wait"
                 log_error "To prevent corruption, aborting this operation"
@@ -251,7 +284,7 @@ check_git_operations() {
                 return 1
             fi
         fi
-        
+
         # Check for git index lock
         if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
             log_error "Git index is locked - another git process may be running"
@@ -265,6 +298,8 @@ check_git_operations() {
 
 # Main execution starts here
 log_info "Sequential executor starting for: $*"
+log_info "Project: $PROJECT_ROOT"
+log_info "Log file: $EXEC_LOG"
 
 # Step 0: Check for git operation conflicts
 if ! check_git_operations "$@"; then
