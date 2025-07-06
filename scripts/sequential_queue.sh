@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sequential_queue.sh - Universal sequential execution queue manager
-# Version: 8.2.0
+# Version: 8.3.0
 #
 # This version implements the correct flow:
 # 1. Commands are added to queue (atomified if possible)
@@ -9,18 +9,24 @@
 # 4. All commands execute in exact order of addition
 #
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# v8.3.0:
+# - Implemented all 4 "missing" filters: user, commit, event, created
+# - Enhanced metadata storage to capture git user, commit SHA, and created date
+# - Added backward compatibility for existing metadata files
+# - Fixed "failed" status filter to properly check exit codes
+# - Enhanced JSON output to include actor and event fields
+# - Updated view_run to display user, branch, and commit information
+# v8.2.0:
 # - Added missing parameters to function calls for list_runs (all 13 parameters)
 # - Added missing parameters to function calls for view_runs (exit_status, attempt)
 # - Implemented --exit-status flag for view command
 # - Implemented JSON field filtering with --json FIELDS option
 # - Implemented JQ expression filtering with --jq option
 # - Fixed security vulnerability by replacing eval with safer command parsing
-# - Added documentation for unimplemented filters (user, commit, event, created)
-# - Updated version from 8.1.0 to 8.2.0
 #
 set -euo pipefail
 
-VERSION='8.2.0'
+VERSION='8.3.0'
 
 # Constants
 readonly DEFAULT_LIST_LIMIT=20
@@ -33,7 +39,7 @@ readonly DEFAULT_PIPELINE_TIMEOUT=86400
 # Display help message
 show_help() {
     cat << 'EOF'
-sequential_queue.sh v8.2.0 - Universal sequential execution queue
+sequential_queue.sh v8.3.0 - Universal sequential execution queue
 
 USAGE:
     sequential_queue.sh [OPTIONS] -- COMMAND [ARGS...]
@@ -225,12 +231,13 @@ queue_status() {
 
 # Helper function to load metadata from a file into variables
 # Usage: load_metadata <file_path>
-# Sets: RUN_ID, START_TIME, PID, STATUS, PROJECT, END_TIME, DURATION, EXIT_CODE, BRANCH, WORKFLOW
+# Sets: RUN_ID, START_TIME, PID, STATUS, PROJECT, END_TIME, DURATION, EXIT_CODE, BRANCH, WORKFLOW, USER, COMMIT, EVENT, CREATED
 load_metadata() {
     local meta_file="$1"
     
     # Reset variables
     RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE="" BRANCH="" WORKFLOW=""
+    USER="" COMMIT="" EVENT="" CREATED=""  # New fields
     JOB_ID="" COMMAND="" LOG_FILE=""  # Job-specific fields
     
     if [[ ! -f "$meta_file" ]]; then
@@ -249,6 +256,10 @@ load_metadata() {
             EXIT_CODE) EXIT_CODE="$value" ;;
             BRANCH) BRANCH="$value" ;;
             WORKFLOW) WORKFLOW="$value" ;;
+            USER) USER="$value" ;;
+            COMMIT) COMMIT="$value" ;;
+            EVENT) EVENT="$value" ;;
+            CREATED) CREATED="$value" ;;
             # Job-specific fields
             JOB_ID) JOB_ID="$value" ;;
             SESSION_ID) RUN_ID="$value" ;;  # Handle old field name
@@ -256,6 +267,17 @@ load_metadata() {
             LOG_FILE) LOG_FILE="$value" ;;
         esac
     done < "$meta_file"
+    
+    # Provide defaults for backward compatibility
+    if [[ -z "$USER" ]]; then
+        USER="${USER:-unknown}"
+    fi
+    if [[ -z "$EVENT" ]]; then
+        EVENT="manual"
+    fi
+    if [[ -z "$CREATED" ]] && [[ -n "$START_TIME" ]]; then
+        CREATED="$START_TIME"
+    fi
     
     return 0
 }
@@ -337,10 +359,14 @@ queue_start() {
     local run_meta_dir="${RUNS_DIR}/${run_id}"
     mkdir -p "${run_meta_dir}/jobs"
 
-    # Get current git branch if in git repo
+    # Get git information if in git repo
     local current_branch=""
+    local commit_sha=""
+    local git_user=""
     if [[ -d "$PROJECT_ROOT/.git" ]]; then
         current_branch=$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+        commit_sha=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || echo "")
+        git_user=$(git -C "$PROJECT_ROOT" config user.name 2>/dev/null || echo "${USER:-unknown}")
     fi
     
     # Store run metadata
@@ -352,6 +378,10 @@ STATUS=running
 PROJECT=$PROJECT_ROOT
 BRANCH=$current_branch
 WORKFLOW=sequential_queue
+USER=$git_user
+COMMIT=$commit_sha
+EVENT=manual
+CREATED=$run_start
 EOF
 
     # Create run log
@@ -604,8 +634,15 @@ list_runs() {
         load_metadata "$meta_file" || continue
         
         # Apply filters
-        if [[ -n "$status_filter" ]] && [[ "$STATUS" != "$status_filter" ]]; then
-            continue
+        if [[ -n "$status_filter" ]]; then
+            # Special handling for "failed" status
+            if [[ "$status_filter" == "failed" ]]; then
+                if [[ "$STATUS" != "completed" ]] || [[ "${EXIT_CODE:-0}" -eq 0 ]]; then
+                    continue
+                fi
+            elif [[ "$STATUS" != "$status_filter" ]]; then
+                continue
+            fi
         fi
         
         # If no branch in metadata, assume current branch
@@ -621,11 +658,28 @@ list_runs() {
             continue
         fi
         
-        # Note: The following filters are not implemented as they require additional metadata:
-        # - user_filter: Would need to store user who initiated the command
-        # - commit_filter: Would need to store git commit SHA at run start
-        # - event_filter: Not applicable to local queue (no git events)
-        # - created_filter: Would need date parsing and comparison logic
+        # Apply additional filters
+        if [[ -n "$user_filter" ]] && [[ "$USER" != "$user_filter" ]]; then
+            continue
+        fi
+        
+        if [[ -n "$commit_filter" ]] && [[ "$COMMIT" != "$commit_filter" ]]; then
+            continue
+        fi
+        
+        if [[ -n "$event_filter" ]] && [[ "$EVENT" != "$event_filter" ]]; then
+            continue
+        fi
+        
+        # Date filter - compare created date
+        if [[ -n "$created_filter" ]]; then
+            # Convert both dates to epoch for comparison
+            local created_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "${CREATED:-$START_TIME}" "+%s" 2>/dev/null || date -d "${CREATED:-$START_TIME}" "+%s" 2>/dev/null)
+            local filter_epoch=$(date -j -f "%Y-%m-%d" "$created_filter" "+%s" 2>/dev/null || date -d "$created_filter" "+%s" 2>/dev/null)
+            if [[ $created_epoch -lt $filter_epoch ]]; then
+                continue
+            fi
+        fi
         
         # Count jobs
         local job_count=0
@@ -660,12 +714,14 @@ list_runs() {
             json_array+="\"conclusion\":\"$gh_status\","
             json_array+="\"workflowName\":\"${WORKFLOW:-sequential_queue}\","
             json_array+="\"headBranch\":\"$BRANCH\","
-            json_array+="\"headSha\":\"\","
+            json_array+="\"headSha\":\"${COMMIT:-}\","
             json_array+="\"createdAt\":\"$created_at\","
             json_array+="\"updatedAt\":\"$updated_at\","
             json_array+="\"startedAt\":\"$START_TIME\","
             json_array+="\"workflowDatabaseId\":1,"
-            json_array+="\"url\":\"file://${RUNS_DIR}/${run}\""
+            json_array+="\"url\":\"file://${RUNS_DIR}/${run}\","
+            json_array+="\"actor\":{\"login\":\"${USER:-unknown}\"},"
+            json_array+="\"event\":\"${EVENT:-manual}\""
             json_array+="}"
         else
             # Terminal output - use helper for status display
@@ -966,6 +1022,15 @@ view_run() {
         echo "Exit Code: $EXIT_CODE"
     fi
     echo "Project: $PROJECT"
+    if [[ -n "${USER:-}" ]]; then
+        echo "User: $USER"
+    fi
+    if [[ -n "${BRANCH:-}" ]]; then
+        echo "Branch: $BRANCH"
+    fi
+    if [[ -n "${COMMIT:-}" ]]; then
+        echo "Commit: ${COMMIT:0:8}"  # Show short SHA
+    fi
     echo ""
 
     # List jobs
@@ -1208,9 +1273,11 @@ while [[ $# -gt 0 ]]; do
                             -s|--status)
                                 # Map GitHub status names to our names
                                 case "$2" in
-                                    queued|in_progress) LIST_STATUS="running" ;;
+                                    queued) LIST_STATUS="queued" ;;
+                                    in_progress) LIST_STATUS="running" ;;
                                     completed) LIST_STATUS="completed" ;;
-                                    failed) LIST_STATUS="completed" ;; # We'll filter by exit code
+                                    failed) LIST_STATUS="failed" ;; # Special case handled in filter
+                                    cancelled) LIST_STATUS="stopped" ;;
                                     *) LIST_STATUS="$2" ;;
                                 esac
                                 shift 2
@@ -1960,6 +2027,7 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
     echo "[SEQ-QUEUE] Command added to queue"
     echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
 fi
+
 
 
 
