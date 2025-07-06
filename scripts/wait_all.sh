@@ -268,8 +268,23 @@ EOF
 
 # ──────────────────────── Error & exit helpers ───────────────────────────
 die() {
+  # Log the fatal error
+  if [[ -n "${LOG_FILE:-}" ]]; then
+    {
+      echo "=== FATAL ERROR ==="
+      echo "Time: $(date -u +"%F %T UTC")"
+      echo "Message: $*"
+      echo "Active PIDs: ${SPAWNED_PIDS[*]:-none}"
+      echo "Active PGIDs: ${SPAWNED_PGIDS[*]:-none}"
+      echo "================================================================"
+    } >>"$LOG_FILE" 2>&1 || true
+  fi
+
   printf '%s: %s\n' "$SCRIPT_NAME" "$*" >&2
   printf "execute '%s --help' for more details.\n" "$SCRIPT_NAME" >&2
+
+  # ALWAYS cleanup before exit
+  cleanup
   exit 1
 }
 
@@ -286,15 +301,158 @@ short_usage() {
   ' "$0"
 }
 
-# Temp-file cleanup on any exit
+# Global tracking for comprehensive cleanup
 TEMP_FILES=()
-cleanup() { rm -f -- "${TEMP_FILES[@]:-}" 2>/dev/null || true; }
+SPAWNED_PIDS=()
+SPAWNED_PGIDS=()
+CLEANUP_IN_PROGRESS=0
+
+# Comprehensive cleanup that ALWAYS kills all spawned processes
+cleanup() {
+  # Prevent recursive cleanup
+  if (( CLEANUP_IN_PROGRESS )); then
+    return 0
+  fi
+  CLEANUP_IN_PROGRESS=1
+
+  local exit_code=$?
+
+  # Log cleanup start
+  if [[ -n "${LOG_FILE:-}" ]]; then
+    echo "=== CLEANUP STARTED at $(date -u +"%F %T UTC") ===" >>"$LOG_FILE" 2>&1 || true
+  fi
+
+  # First, try to kill all process groups we created
+  local pgid
+  for pgid in "${SPAWNED_PGIDS[@]:-}"; do
+    if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
+      # Log what we're killing
+      if [[ -n "${LOG_FILE:-}" ]]; then
+        echo "Killing process group $pgid" >>"$LOG_FILE" 2>&1 || true
+        ps -g "$pgid" -o pid,ppid,comm 2>&1 >>"$LOG_FILE" || true
+      fi
+      # SIGTERM first
+      kill -TERM -"$pgid" 2>/dev/null || true
+    fi
+  done
+
+  # Give processes a moment to exit gracefully
+  sleep 0.1
+
+  # Force kill any remaining process groups
+  for pgid in "${SPAWNED_PGIDS[@]:-}"; do
+    if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
+      # Check if any processes still exist in this group
+      if ps -g "$pgid" >/dev/null 2>&1; then
+        if [[ -n "${LOG_FILE:-}" ]]; then
+          echo "Force killing process group $pgid" >>"$LOG_FILE" 2>&1 || true
+        fi
+        kill -KILL -"$pgid" 2>/dev/null || true
+      fi
+    fi
+  done
+
+  # Now kill any individual PIDs that might have escaped
+  local pid
+  for pid in "${SPAWNED_PIDS[@]:-}"; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      if [[ -n "${LOG_FILE:-}" ]]; then
+        echo "Killing individual process $pid" >>"$LOG_FILE" 2>&1 || true
+      fi
+      kill -TERM "$pid" 2>/dev/null || true
+      sleep 0.05
+      # Force kill if still alive
+      if kill -0 "$pid" 2>/dev/null; then
+        kill -KILL "$pid" 2>/dev/null || true
+      fi
+    fi
+  done
+
+  # Remove temp files
+  rm -f -- "${TEMP_FILES[@]:-}" 2>/dev/null || true
+
+  # Log cleanup completion
+  if [[ -n "${LOG_FILE:-}" ]]; then
+    echo "=== CLEANUP COMPLETED ===" >>"$LOG_FILE" 2>&1 || true
+  fi
+
+  return $exit_code
+}
+
+# Enhanced error handler
+error_handler() {
+  local line=$1
+  local exit_code=$?
+
+  # Disable traps to prevent recursion
+  trap - ERR EXIT INT TERM
+
+  # Log the error
+  if [[ -n "${LOG_FILE:-}" ]]; then
+    {
+      echo "=== ERROR at line $line (exit code: $exit_code) ==="
+      echo "Time: $(date -u +"%F %T UTC")"
+      echo "Command: ${BASH_COMMAND:-unknown}"
+      echo "Active PIDs: ${SPAWNED_PIDS[*]:-none}"
+      echo "Active PGIDs: ${SPAWNED_PGIDS[*]:-none}"
+      echo "================================================================"
+    } >>"$LOG_FILE" 2>&1 || true
+  fi
+
+  # Print to stderr
+  printf '%s: ERROR at line %d (exit code: %d)\n' "$SCRIPT_NAME" "$line" "$exit_code" >&2
+
+  # ALWAYS cleanup before exit
+  cleanup
+
+  # Force exit
+  exit $exit_code
+}
+
+# Set up signal handlers to ensure cleanup
 trap cleanup EXIT
-trap 'die "unexpected error on line $LINENO"' ERR
+trap 'error_handler $LINENO' ERR
+trap 'echo "Interrupted!" >&2; cleanup; exit 130' INT
+trap 'echo "Terminated!" >&2; cleanup; exit 143' TERM
 
 # ───────────────────────── Helpers: validation ───────────────────────────
 have()            { command -v "$1" >/dev/null 2>&1; }
 is_integer()      { [[ ${1:-x} =~ ^[0-9]+$ ]]; }
+
+# Find all descendant processes of a given PID
+find_descendants() {
+  local parent_pid=$1
+  local found_pids=()
+
+  # Get direct children
+  local children
+  if [[ $(uname) == "Darwin" ]]; then
+    # macOS: use ps with ppid
+    children=$(ps -o pid= -o ppid= | awk -v ppid="$parent_pid" '$2 == ppid {print $1}' 2>/dev/null || true)
+  else
+    # Linux: use ps with ppid
+    children=$(ps -o pid= --ppid "$parent_pid" 2>/dev/null || true)
+  fi
+
+  # Add children to found list
+  local child
+  for child in $children; do
+    if [[ "$child" =~ ^[0-9]+$ ]]; then
+      found_pids+=("$child")
+      # Recursively find descendants of this child
+      local grandchildren
+      grandchildren=$(find_descendants "$child")
+      if [[ -n "$grandchildren" ]]; then
+        found_pids+=($grandchildren)
+      fi
+    fi
+  done
+
+  # Return unique PIDs
+  if (( ${#found_pids[@]} > 0 )); then
+    printf '%s\n' "${found_pids[@]}" | sort -u | tr '\n' ' '
+  fi
+}
 
 # Accepts numeric, TERM, or SIGTERM (case-insensitive, BSD/Linux/BusyBox)
 is_valid_signal() {
@@ -435,7 +593,7 @@ adjust_command() {
   fi
 
   # 2) bash script.sh → uv run
-  if [[ $first == bash && ${orig[1]:-} == *.sh && have uv ]]; then
+  if [[ $first == bash && ${orig[1]:-} == *.sh ]] && have uv; then
     set_out uv run "${orig[@]:1}"; return 0
   fi
 
@@ -457,7 +615,7 @@ adjust_command() {
   fi
 
   # 6) npm → pnpm
-  if [[ $first == npm && have pnpm ]]; then
+  if [[ $first == npm ]] && have pnpm; then
     if [[ ${orig[1]:-} == run ]]; then
       set_out pnpm run "${orig[@]:2}"
     else
@@ -467,7 +625,7 @@ adjust_command() {
   fi
 
   # 7) Bare package.json script → pnpm run
-  if [[ -f package.json && have pnpm ]]; then
+  if [[ -f package.json ]] && have pnpm; then
     if have jq && jq -e --arg s "$first" '.scripts[$s]?' package.json >/dev/null 2>&1; then
       set_out pnpm run "$first" "${orig[@]:1}"
     fi
@@ -506,34 +664,146 @@ run_once() {
   fi
   local main_pid=$!
 
+  # IMMEDIATELY track the spawned process
+  SPAWNED_PIDS+=("$main_pid")
+
+  # Small delay to ensure process starts
+  sleep_short 0.02
+
   # Get process-group ID (macOS needs -p)
-  local pgid
-  if pgid=$(ps -p "$main_pid" -o pgid= 2>/dev/null); then
-    pgid=$(tr -d '[:space:],<' <<<"$pgid")
-  else
-    pgid=""
+  local pgid=""
+  if kill -0 "$main_pid" 2>/dev/null; then
+    # Try to get pgid with retries for slow-starting processes
+    local retry
+    for retry in 1 2 3; do
+      if pgid=$(ps -p "$main_pid" -o pgid= 2>/dev/null); then
+        pgid=$(echo "$pgid" | tr -d '[:space:],<')
+        if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
+          # Track the process group
+          SPAWNED_PGIDS+=("$pgid")
+
+          # IMMEDIATELY scan for child processes
+          local ps_output
+          if [[ $(uname) == "Darwin" ]]; then
+            ps_output=$(ps -g "$pgid" -o pid= 2>/dev/null || true)
+          else
+            ps_output=$(ps -o pid= -g "$pgid" 2>/dev/null || true)
+          fi
+
+          if [[ -n "$ps_output" ]]; then
+            local child_pid
+            for child_pid in $ps_output; do
+              if [[ "$child_pid" =~ ^[0-9]+$ ]] && [[ "$child_pid" != "$main_pid" ]]; then
+                # Track child processes immediately
+                local already_tracked=0
+                local p
+                for p in "${SPAWNED_PIDS[@]:-}"; do
+                  if [[ "$p" == "$child_pid" ]]; then
+                    already_tracked=1
+                    break
+                  fi
+                done
+                if (( ! already_tracked )); then
+                  SPAWNED_PIDS+=("$child_pid")
+                  (( VERBOSE )) && echo "[$SCRIPT_NAME] Discovered child process: PID $child_pid" >&2
+                fi
+              fi
+            done
+          fi
+
+          break
+        fi
+      fi
+      sleep_short 0.02
+    done
   fi
 
   local timed_out=0 exit_code=0
   local start_s=$(epoch_s)
-  local SAMPLE=0.2
+  local SAMPLE=0.05  # Sample every 50ms to catch short-lived processes
 
   # ── Monitoring loop ────────────────────────────────────────────────────
   while kill -0 "$main_pid" 2>/dev/null; do
     sleep_short "$SAMPLE"
 
-    # Sample memory (only if we know pgid)
-    if [[ -n $pgid ]]; then
-      # GNU ps accepts " -g $pgid", macOS needs "-g$pgid"
-      if ps -o pid= -g "$pgid" >/dev/null 2>&1; then
-        ps -o pid=,rss= -g "$pgid"
+    # Find all descendants of main process
+    local descendants=$(find_descendants "$main_pid")
+    if [[ -n "$descendants" ]]; then
+      local desc_pid
+      for desc_pid in $descendants; do
+        if [[ "$desc_pid" =~ ^[0-9]+$ ]]; then
+          # Track this descendant if not already tracked
+          local already_tracked=0
+          local p
+          for p in "${SPAWNED_PIDS[@]:-}"; do
+            if [[ "$p" == "$desc_pid" ]]; then
+              already_tracked=1
+              break
+            fi
+          done
+          if (( ! already_tracked )); then
+            SPAWNED_PIDS+=("$desc_pid")
+            (( VERBOSE )) && echo "[$SCRIPT_NAME] Found descendant process: PID $desc_pid" >&2
+          fi
+        fi
+      done
+    fi
+
+    # Sample memory AND track all processes in the group
+    if [[ -n $pgid ]] && [[ "$pgid" -gt 0 ]]; then
+      # Get all processes in the group
+      local ps_output
+      if [[ $(uname) == "Darwin" ]]; then
+        # macOS: use -g with pgid
+        ps_output=$(ps -g "$pgid" -o pid=,rss= 2>/dev/null || true)
       else
-        ps -g"$pgid" -o pid,rss
-      fi | while read -r pid rss; do
-          local sys
-          sys=$(sys_mem)
-          printf '%s %s %s %s\n' "$(epoch_s)" "$pid" "$rss" "$sys" >>"$mem_snap"
-        done
+        # Linux: use -g with space
+        ps_output=$(ps -o pid=,rss= -g "$pgid" 2>/dev/null || true)
+      fi
+
+      # Process each PID found (avoiding subshell to preserve array modifications)
+      if [[ -n "$ps_output" ]]; then
+        # Save to temp file to avoid subshell
+        local ps_temp=$(mktemp); TEMP_FILES+=("$ps_temp")
+        echo "$ps_output" >"$ps_temp"
+
+        # Read line by line without creating subshell
+        while IFS= read -r line; do
+          local pid rss
+          # Parse the line
+          set -- $line
+          pid=$1 rss=$2
+
+          if [[ -n "$pid" ]] && [[ "$pid" =~ ^[0-9]+$ ]]; then
+            # Track this PID if we haven't seen it before
+            local already_tracked=0
+            local p
+            for p in "${SPAWNED_PIDS[@]:-}"; do
+              if [[ "$p" == "$pid" ]]; then
+                already_tracked=1
+                break
+              fi
+            done
+
+            # Add new PIDs to our tracking
+            if (( ! already_tracked )); then
+              SPAWNED_PIDS+=("$pid")
+              if [[ -n "${LOG_FILE:-}" ]]; then
+                echo "Discovered new process: PID $pid in pgid $pgid" >>"$LOG_FILE" 2>&1 || true
+              fi
+            fi
+
+            # Record memory usage
+            if [[ -n "$rss" ]] && [[ "$rss" =~ ^[0-9]+$ ]]; then
+              local sys
+              sys=$(sys_mem)
+              printf '%s %s %s %s\n' "$(epoch_s)" "$pid" "$rss" "$sys" >>"$mem_snap"
+            fi
+          fi
+        done <"$ps_temp"
+
+        rm -f "$ps_temp"
+      fi
     fi
 
     # Timeout?
@@ -553,9 +823,49 @@ run_once() {
   # Wait for exit & settle
   wait "$main_pid" 2>/dev/null || true
   local child_rc=$?
-  if [[ -n $pgid ]]; then
-    while pgrep -g "$pgid" >/dev/null 2>&1; do sleep_short 0.05; done
+
+  # Wait for all processes in group to exit
+  if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
+    local wait_count=0
+    while pgrep -g "$pgid" >/dev/null 2>&1 && (( wait_count < 50 )); do
+      sleep_short 0.05
+      wait_count=$((wait_count + 1))
+    done
+    # Force kill if still running after 2.5 seconds
+    if pgrep -g "$pgid" >/dev/null 2>&1; then
+      kill -KILL -"$pgid" 2>/dev/null || true
+    fi
   fi
+
+  # Remove completed process from tracking arrays
+  local new_pids=()
+  local pid
+  for pid in "${SPAWNED_PIDS[@]:-}"; do
+    if [[ "$pid" != "$main_pid" ]]; then
+      new_pids+=("$pid")
+    fi
+  done
+  # Handle empty array case
+  if (( ${#new_pids[@]} > 0 )); then
+    SPAWNED_PIDS=("${new_pids[@]}")
+  else
+    SPAWNED_PIDS=()
+  fi
+
+  # Remove pgid from tracking
+  local new_pgids=()
+  local pg
+  for pg in "${SPAWNED_PGIDS[@]:-}"; do
+    if [[ "$pg" != "$pgid" ]]; then
+      new_pgids+=("$pg")
+    fi
+  done
+  if (( ${#new_pgids[@]} > 0 )); then
+    SPAWNED_PGIDS=("${new_pgids[@]}")
+  else
+    SPAWNED_PGIDS=()
+  fi
+
   if (( timed_out )); then exit_code=124; else exit_code=$child_rc; fi
 
   # Read captured streams
@@ -603,7 +913,25 @@ run_once() {
 # ───────────────────── Retry orchestration loop ──────────────────────────
 final_out= final_err= final_rc=0
 for (( attempt=1; ; ++attempt )); do
-  IFS=$'\0' read -r out_f err_f rc < <(run_once "$attempt")
+  # Debug: check if run_once is defined
+  if ! declare -f run_once >/dev/null 2>&1; then
+    echo "ERROR: run_once function not defined" >&2
+    exit 1
+  fi
+  # Read NUL-separated output from run_once
+  # Use temporary file to handle NUL-separated values
+  TEMP_RUN=$(mktemp); TEMP_FILES+=("$TEMP_RUN")
+  run_once "$attempt" > "$TEMP_RUN"
+
+  # Extract the three NUL-separated values
+  out_f=$(awk 'BEGIN{RS="\0"; ORS=""} NR==1 {print}' "$TEMP_RUN")
+  err_f=$(awk 'BEGIN{RS="\0"; ORS=""} NR==2 {print}' "$TEMP_RUN")
+  rc=$(awk 'BEGIN{RS="\0"; ORS=""} NR==3 {print}' "$TEMP_RUN")
+
+  # Default values if extraction failed
+  : "${out_f:=/dev/null}"
+  : "${err_f:=/dev/null}"
+  : "${rc:=1}"
   if (( rc == 0 )) || (( attempt > RETRY_MAX )); then
     final_out=$(<"$out_f")
     final_err=$(<"$err_f")
