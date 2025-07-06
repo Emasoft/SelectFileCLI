@@ -310,7 +310,12 @@ CLEANUP_IN_PROGRESS=0
 # Store our own PID and parent PID to avoid killing them
 WAIT_ALL_PID=$$
 WAIT_ALL_PPID=$PPID
-WAIT_ALL_PGID=$(ps -p $$ -o pgid= 2>/dev/null | tr -d '[:space:],<' || echo 0)
+# Get our process group ID safely
+if WAIT_ALL_PGID=$(ps -p $$ -o pgid= 2>/dev/null); then
+  WAIT_ALL_PGID=$(echo "$WAIT_ALL_PGID" | tr -d '[:space:],<')
+else
+  WAIT_ALL_PGID=0
+fi
 
 # Comprehensive cleanup that ALWAYS kills all spawned processes
 cleanup() {
@@ -427,7 +432,8 @@ error_handler() {
 }
 
 # Set up signal handlers to ensure cleanup
-trap cleanup EXIT
+# Ensure cleanup preserves exit code
+trap 'EC=$?; cleanup; exit $EC' EXIT
 trap 'error_handler $LINENO' ERR
 trap 'echo "Interrupted!" >&2; cleanup; exit 130' INT
 trap 'echo "Terminated!" >&2; cleanup; exit 143' TERM
@@ -846,8 +852,11 @@ run_once() {
   done
 
   # Wait for exit & settle
-  wait "$main_pid" 2>/dev/null || true
+  # Disable error checking for wait since we want to capture the exit code
+  set +e
+  wait "$main_pid" 2>/dev/null
   local child_rc=$?
+  set -e
 
   # Wait for all processes in group to exit
   if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
@@ -938,10 +947,9 @@ run_once() {
 # ───────────────────── Retry orchestration loop ──────────────────────────
 final_out= final_err= final_rc=0
 for (( attempt=1; ; ++attempt )); do
-  # Debug: check if run_once is defined
+  # Check if run_once is defined (removed debug comment that was corrupting output)
   if ! declare -f run_once >/dev/null 2>&1; then
-    echo "ERROR: run_once function not defined" >&2
-    exit 1
+    die "run_once function not defined"
   fi
   # Read NUL-separated output from run_once
   # Use temporary file to handle NUL-separated values
@@ -949,9 +957,13 @@ for (( attempt=1; ; ++attempt )); do
   run_once "$attempt" > "$TEMP_RUN"
 
   # Extract the three NUL-separated values
-  out_f=$(awk 'BEGIN{RS="\0"; ORS=""} NR==1 {print}' "$TEMP_RUN")
-  err_f=$(awk 'BEGIN{RS="\0"; ORS=""} NR==2 {print}' "$TEMP_RUN")
-  rc=$(awk 'BEGIN{RS="\0"; ORS=""} NR==3 {print}' "$TEMP_RUN")
+  # Use tr to convert NUL to newlines for easier parsing
+  tr '\0' '\n' < "$TEMP_RUN" > "${TEMP_RUN}.lines"
+  out_f=$(sed -n '1p' "${TEMP_RUN}.lines")
+  err_f=$(sed -n '2p' "${TEMP_RUN}.lines")
+  rc=$(sed -n '3p' "${TEMP_RUN}.lines")
+  rm -f "${TEMP_RUN}.lines"
+
 
   # Default values if extraction failed
   : "${out_f:=/dev/null}"
