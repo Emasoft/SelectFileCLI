@@ -44,7 +44,7 @@ repos:
     hooks:
       - id: ruff-format-atomic
         name: Format Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff format --line-length=320 "$f" || exit 1; done' --
+        entry: ./scripts/sequential_wrapper.sh ruff format --line-length=320 --
         language: system
         types: [python]
         pass_filenames: true
@@ -53,7 +53,7 @@ repos:
 
       - id: ruff-check-atomic
         name: Lint Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --fix "$f" || exit 1; done' --
+        entry: ./scripts/sequential_wrapper.sh ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --fix --
         language: system
         types: [python]
         pass_filenames: true
