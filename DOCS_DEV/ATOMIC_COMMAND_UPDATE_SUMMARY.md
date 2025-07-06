@@ -35,7 +35,7 @@ Updated all scripts and documentation to enforce the atomic command principle wh
 
 ### 2. Documentation Updates
 
-#### SEQUENTIAL_PRECOMMIT_SETUP 2.md
+#### SEQUENTIAL_PRECOMMIT_SETUP_v3.md
 - Replaced sequential-executor.sh source with current strict version
 - Added comprehensive atomic command principle section
 - Updated all examples to show atomic vs non-atomic patterns

@@ -102,4 +102,4 @@ git add test.txt
 git commit -m "Test commit"  # Should complete without hanging
 ```
 
-The fix has been tested and integrated into SEQUENTIAL_PRECOMMIT_SETUP 2.md documentation.
+The fix has been tested and integrated into SEQUENTIAL_PRECOMMIT_SETUP_v3.md documentation.

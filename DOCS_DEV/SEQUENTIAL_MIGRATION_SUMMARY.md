@@ -2,7 +2,7 @@
 
 ## Overview
 
-The SelectFileCLI project has been successfully migrated to the updated sequential execution protocol as specified in `SEQUENTIAL_PRECOMMIT_SETUP 2.md`. This ensures that only ONE process runs at a time, preventing process explosions and memory exhaustion.
+The SelectFileCLI project has been successfully migrated to the updated sequential execution protocol as specified in `SEQUENTIAL_PRECOMMIT_SETUP_v3.md`. This ensures that only ONE process runs at a time, preventing process explosions and memory exhaustion.
 
 ## Key Components Implemented
 

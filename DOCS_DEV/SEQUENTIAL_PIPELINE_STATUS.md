@@ -2,7 +2,7 @@
 
 ## ✅ Migration Complete
 
-The SelectFileCLI project has been successfully migrated to the updated sequential execution pipeline as specified in `SEQUENTIAL_PRECOMMIT_SETUP 2.md`.
+The SelectFileCLI project has been successfully migrated to the updated sequential execution pipeline as specified in `SEQUENTIAL_PRECOMMIT_SETUP_v3.md`.
 
 ## Key Features Implemented
 

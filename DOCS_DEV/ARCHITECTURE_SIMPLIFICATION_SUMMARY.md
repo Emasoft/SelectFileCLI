@@ -77,7 +77,7 @@ format:
 - **ensure-sequential.sh**: Removed checks for safe-run.sh
 
 ### 2. Documentation Updated:
-- **SEQUENTIAL_PRECOMMIT_SETUP 2.md**:
+- **SEQUENTIAL_PRECOMMIT_SETUP_v3.md**:
   - Removed sections 2.4 (safe-run.sh) and 2.5 (seq)
   - Renumbered all subsequent sections
   - Updated all usage examples
