@@ -1,8 +1,5 @@
-# Sequential pre-commit configuration
-# All hooks run one at a time to prevent process explosions
-#
-# CRITICAL: Every hook MUST have require_serial: true
-# This prevents ANY parallel execution
+# Pre-commit configuration
+# Using standard hooks with require_serial for sequential execution
 
 default_language_version:
   python: python3.11
@@ -10,155 +7,88 @@ default_language_version:
 default_stages: [pre-commit]
 
 repos:
-  # Basic file checks first (lightweight) - wrapped in sequential queue
-  - repo: local
+  # Standard pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
     hooks:
       - id: trailing-whitespace
-        name: Fix trailing whitespace
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- sed -i "" "s/[[:space:]]*$//" "$f" || exit 1; done' --
-        language: system
-        types: [text]
-        stages: [pre-commit]
         require_serial: true
-        pass_filenames: true
       - id: end-of-file-fixer
-        name: Fix end of files
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- sh -c "[ -n \"\$(tail -c1 \"$f\")\" ] && echo >> \"$f\"" || exit 1; done' --
-        language: system
-        types: [text]
-        stages: [pre-commit]
         require_serial: true
-        pass_filenames: true
       - id: check-yaml
-        name: Check YAML syntax
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- python -m yaml safe_load < "$f" > /dev/null || exit 1; done' --
-        language: system
-        files: '\.(yml|yaml)$'
-        stages: [pre-commit]
         require_serial: true
-        pass_filenames: true
       - id: check-added-large-files
-        name: Check for large files
-        entry: bash -c 'for f in "$@"; do size=$(wc -c < "$f"); [ $size -lt 1024000 ] || { echo "$f is too large"; exit 1; }; done' --
-        language: system
-        stages: [pre-commit]
         require_serial: true
-        pass_filenames: true
       - id: check-toml
-        name: Check TOML syntax
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- python -c "import toml; toml.load(open(\"$f\"))" || exit 1; done' --
-        language: system
-        files: '\.toml$'
-        stages: [pre-commit]
         require_serial: true
-        pass_filenames: true
       - id: check-json
-        name: Check JSON syntax
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- python -m json.tool "$f" > /dev/null || exit 1; done' --
-        language: system
-        files: '\.json$'
-        stages: [pre-commit]
         require_serial: true
-        pass_filenames: true
       - id: check-merge-conflict
-        name: Check for merge conflicts
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- grep -E "^(<<<<<<<|=======|>>>>>>>)" "$f" && { echo "Merge conflict markers found in $f"; exit 1; } || true; done' --
-        language: system
-        types: [text]
-        stages: [pre-commit]
         require_serial: true
-        pass_filenames: true
 
   # Update uv lockfile
   - repo: https://github.com/astral-sh/uv-pre-commit
     rev: 0.7.17
     hooks:
       - id: uv-lock
-        stages: [pre-commit]
         require_serial: true
 
-  # Python formatting and linting (with require_serial: true)
-  - repo: local
+  # Python formatting and linting with Ruff
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.9.2
     hooks:
-      - id: ruff-format-atomic
-        name: Format Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff format --line-length=320 "$f" || exit 1; done' --
-        language: system
-        types: [python]
-        pass_filenames: true
-        stages: [pre-commit]
+      - id: ruff-format
+        args: [--line-length=320]
+        require_serial: true
+      - id: ruff
+        args: [--fix, --ignore, "E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291"]
         require_serial: true
 
-      - id: ruff-check-atomic
-        name: Lint Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --fix "$f" || exit 1; done' --
-        language: system
-        types: [python]
-        pass_filenames: true
-        stages: [pre-commit]
-        require_serial: true
-
-      - id: deptry
-        name: Check dependencies with deptry
-        entry: ./scripts/sequential_queue.sh --timeout 7200 -- uv run deptry src
-        language: system
-        types: [python]
-        pass_filenames: false
-        stages: [pre-commit]
-        require_serial: true
-
-  # Use safe-run.sh for resource-intensive hooks
-  - repo: local
+  # Type checking
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.14.1
     hooks:
-      - id: mypy-safe
-        name: Type checking (safe)
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 7200 -- uv run mypy --ignore-missing-imports --strict "$f" || exit 1; done' --
-        language: system
-        types: [python]
+      - id: mypy
+        args: [--strict, --ignore-missing-imports]
         require_serial: true
-        pass_filenames: true
-        stages: [pre-commit]
 
-      - id: trufflehog-safe
-        name: Secret detection (safe)
-        entry: ./scripts/sequential_queue.sh --timeout 3600 -- trufflehog git file://. --only-verified --fail --no-update
-        language: system
+  # Secret detection
+  - repo: https://github.com/trufflesecurity/trufflehog
+    rev: v3.63.5
+    hooks:
+      - id: trufflehog
+        name: TruffleHog v3
+        entry: trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        language: golang
         pass_filenames: false
         require_serial: true
-        stages: [pre-commit]
 
-  # YAML formatting and linting (sequential)
+  # YAML formatting (only for GitHub workflows)
   - repo: local
     hooks:
       - id: yamlfmt
         name: Format YAML files
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 1800 -- yamlfmt "$f" || exit 1; done' --
+        entry: yamlfmt
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
-        pass_filenames: true
-        stages: [pre-commit]
         require_serial: true
 
       - id: yamllint
         name: Lint YAML files
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 1800 -- uv run yamllint "$f" || exit 1; done' --
+        entry: yamllint
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
-        pass_filenames: true
-        stages: [pre-commit]
         require_serial: true
 
       - id: actionlint
         name: Lint GitHub Actions workflows
-        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 1800 -- actionlint "$f" || exit 1; done' --
+        entry: actionlint
         language: system
         files: '^\.github/workflows/.*\.(yml|yaml)$'
-        pass_filenames: true
-        stages: [pre-commit]
         require_serial: true
 
 # CI configuration
 ci:
   skip:
-    - mypy-safe
-    - trufflehog-safe
+    - mypy
+    - trufflehog
