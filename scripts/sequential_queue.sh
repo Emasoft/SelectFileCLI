@@ -1,32 +1,37 @@
 #!/usr/bin/env bash
 # sequential_queue.sh - Universal sequential execution queue manager
-# Version: 3.0.0
+# Version: 7.0.0
 #
-# This script consolidates:
-# - sequential-executor.sh (general queue management)
-# - git-specific safety checks (integrated)
-# - make-sequential.sh (make-specific handling)
-#
-# Auto-detects git and make commands for special handling while
-# maintaining a single queue for ALL operations.
+# This version implements the correct flow:
+# 1. Commands are added to queue (atomified if possible)
+# 2. Queue is NOT executed automatically
+# 3. Queue execution happens only with --queue-start
+# 4. All commands execute in exact order of addition
 #
 set -euo pipefail
 
-VERSION='3.0.0'
+VERSION='7.0.0'
 
 # Display help message
 show_help() {
     cat << 'EOF'
-sequential_queue.sh v3.0.0 - Universal sequential execution queue
+sequential_queue.sh v7.0.0 - Universal sequential execution queue
 
 USAGE:
     sequential_queue.sh [OPTIONS] -- COMMAND [ARGS...]
+    sequential_queue.sh --queue-start
+    sequential_queue.sh --queue-status
+    sequential_queue.sh --queue-pause
+    sequential_queue.sh --queue-resume
+    sequential_queue.sh --queue-stop
     sequential_queue.sh --help
 
 DESCRIPTION:
-    Ensures only ONE command runs at a time across the entire project.
+    Manages a sequential execution queue for commands.
+    Commands are added to queue but NOT executed automatically.
+    Use --queue-start to begin processing the queue.
     Auto-detects git and make commands for special handling.
-    Commands wait indefinitely for their turn in the queue.
+    Automatically atomifies commands to process files individually.
 
 OPTIONS:
     --help, -h             Show this help message
@@ -35,12 +40,41 @@ OPTIONS:
     --memory-limit MB      Memory limit per process in MB (default: 2048)
     --log-dir PATH         Custom log directory (default: PROJECT_ROOT/logs)
     --verbose              Enable verbose output
+    --no-atomify           Disable automatic command atomification
+    --queue-start          Start processing the queue
+    --queue-status         Show current queue status
+    --queue-pause          Pause queue execution
+    --queue-resume         Resume queue execution
+    --queue-stop           Stop queue and clear all pending commands
 
 ENVIRONMENT VARIABLES:
     PIPELINE_TIMEOUT      Total pipeline timeout in seconds (default: 86400)
     MEMORY_LIMIT_MB       Memory limit per process in MB (default: 2048)
     TIMEOUT               Individual command timeout in seconds (default: 86400)
     VERBOSE               Set to 1 for verbose output
+    ATOMIFY               Set to 0 to disable atomification globally
+
+WORKFLOW:
+    1. Add commands to queue:
+       sequential_queue.sh -- ruff check src/
+       sequential_queue.sh -- pytest tests/
+    
+    2. View queue status:
+       sequential_queue.sh --queue-status
+    
+    3. Start execution:
+       sequential_queue.sh --queue-start
+    
+    4. Pause/Resume as needed:
+       sequential_queue.sh --queue-pause
+       sequential_queue.sh --queue-resume
+
+ATOMIFICATION:
+    Commands are automatically broken down into atomic operations:
+    - "ruff check src/" becomes individual "ruff check src/file.py" commands
+    - Each atomic command is added as a separate queue entry
+    - Single files are not atomified (already atomic)
+    - Atomified commands maintain order
 
 SPECIAL HANDLING:
     Git Commands:
@@ -54,36 +88,18 @@ SPECIAL HANDLING:
         - Automatically adds -j1 if not specified
         - Handles recursive makefiles safely
 
-PRINCIPLES:
-    1. Processes wait INDEFINITELY for their turn
-    2. Only ONE process runs at a time - no exceptions
-    3. Pipeline timeout applies to entire execution chain
-    4. Commands should be ATOMIC (smallest units of work)
-
 EXAMPLES:
-    # Git operations (auto-detected)
+    # Add commands to queue
+    sequential_queue.sh -- git add -A
+    sequential_queue.sh -- ruff format src/
+    sequential_queue.sh -- pytest tests/
     sequential_queue.sh -- git commit -m "feat: new feature"
-    sequential_queue.sh -- git push origin main
-
-    # Make operations (auto-detected)
-    sequential_queue.sh -- make test
-    sequential_queue.sh -- make -j1 all
-
-    # General commands
-    sequential_queue.sh -- pytest tests/test_one.py
-    sequential_queue.sh -- ruff format src/main.py
-    sequential_queue.sh -- mypy --strict src/
-
-ATOMIC vs NON-ATOMIC:
-    GOOD (atomic):
-        sequential_queue.sh -- ruff format src/main.py
-        sequential_queue.sh -- pytest tests/test_auth.py
-        sequential_queue.sh -- git commit -m "fix: typo"
-
-    BAD (non-atomic):
-        sequential_queue.sh -- ruff format .
-        sequential_queue.sh -- pytest
-        sequential_queue.sh -- make all
+    
+    # Check queue
+    sequential_queue.sh --queue-status
+    
+    # Start processing
+    sequential_queue.sh --queue-start
 
 LOG FILES:
     Execution logs: PROJECT_ROOT/logs/sequential_queue_*.log
@@ -92,28 +108,163 @@ LOG FILES:
 LOCK FILES:
     Lock directory: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/
     Queue file: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/queue.txt
+    Pause file: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/paused
+    Running file: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/running
 
 EOF
     exit 0
 }
 
+# Queue management commands
+queue_status() {
+    if [[ ! -f "$QUEUE_FILE" ]]; then
+        echo "Queue is empty"
+        return
+    fi
+    
+    echo "Queue Status:"
+    echo "============="
+    
+    # Check if running
+    if [[ -f "$RUNNING_FILE" ]]; then
+        local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
+        if [[ $runner_pid -gt 0 ]] && kill -0 "$runner_pid" 2>/dev/null; then
+            echo "Status: RUNNING (PID: $runner_pid)"
+        else
+            rm -f "$RUNNING_FILE"
+            echo "Status: STOPPED"
+        fi
+    elif [[ -f "$PAUSE_FILE" ]]; then
+        echo "Status: PAUSED"
+    else
+        echo "Status: STOPPED"
+    fi
+    
+    # Show current command
+    if [[ -f "$CURRENT_PID_FILE" ]]; then
+        local current_pid=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
+        if [[ $current_pid -gt 0 ]] && kill -0 "$current_pid" 2>/dev/null; then
+            local current_cmd=$(ps -p "$current_pid" -o args= 2>/dev/null || echo "unknown")
+            echo "Current: PID $current_pid - $current_cmd"
+        fi
+    fi
+    
+    # Show queue
+    echo ""
+    echo "Queued Commands:"
+    local count=0
+    while IFS=: read -r pid timestamp cmd; do
+        ((count++)) || true
+        echo "  $count. PID $pid - $cmd"
+    done < "$QUEUE_FILE"
+    
+    if [[ $count -eq 0 ]]; then
+        echo "  (none)"
+    else
+        echo ""
+        echo "Total: $count commands"
+    fi
+}
+
+queue_start() {
+    # Check if already running
+    if [[ -f "$RUNNING_FILE" ]]; then
+        local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
+        if [[ $runner_pid -gt 0 ]] && kill -0 "$runner_pid" 2>/dev/null; then
+            echo "Queue is already running (PID: $runner_pid)"
+            return 1
+        else
+            rm -f "$RUNNING_FILE"
+        fi
+    fi
+    
+    # Check if queue is empty
+    if [[ ! -s "$QUEUE_FILE" ]]; then
+        echo "Queue is empty - nothing to start"
+        return 0
+    fi
+    
+    echo "Starting queue processing..."
+    echo $$ > "$RUNNING_FILE"
+    
+    # Need to ensure functions are available
+    # Call this script recursively with special internal flag
+    "$0" --internal-process-queue
+    local exit_code=$?
+    
+    rm -f "$RUNNING_FILE"
+    
+    if [[ $exit_code -eq 0 ]]; then
+        echo "Queue processing completed successfully"
+    else
+        echo "Queue processing failed with exit code: $exit_code"
+    fi
+    
+    return $exit_code
+}
+
+queue_pause() {
+    touch "$PAUSE_FILE"
+    echo "Queue paused. Use --queue-resume to continue."
+}
+
+queue_resume() {
+    rm -f "$PAUSE_FILE"
+    echo "Queue resumed."
+}
+
+queue_stop() {
+    echo "Stopping queue and clearing all pending commands..."
+    
+    # Stop the runner process if running
+    if [[ -f "$RUNNING_FILE" ]]; then
+        local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
+        if [[ $runner_pid -gt 0 ]] && kill -0 "$runner_pid" 2>/dev/null; then
+            echo "Stopping runner process: PID $runner_pid"
+            kill "$runner_pid" 2>/dev/null || true
+        fi
+        rm -f "$RUNNING_FILE"
+    fi
+    
+    # Kill current process if running
+    if [[ -f "$CURRENT_PID_FILE" ]]; then
+        local current_pid=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
+        if [[ $current_pid -gt 0 ]] && kill -0 "$current_pid" 2>/dev/null; then
+            echo "Killing current process: PID $current_pid"
+            kill_process_tree "$current_pid"
+        fi
+    fi
+    
+    # Clear queue
+    > "$QUEUE_FILE"
+    rm -f "$PAUSE_FILE"
+    echo "Queue stopped and cleared."
+}
+
 # Parse command line options
 CUSTOM_LOG_DIR=""
+ATOMIFY="${ATOMIFY:-1}"  # Enable atomification by default
+PARSED_TIMEOUT=""
+PARSED_PIPELINE_TIMEOUT=""
+PARSED_MEMORY_LIMIT=""
+PARSED_VERBOSE=""
+QUEUE_COMMAND=""
+
 while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
             show_help
             ;;
         --timeout)
-            TIMEOUT="$2"
+            PARSED_TIMEOUT="$2"
             shift 2
             ;;
         --pipeline-timeout)
-            PIPELINE_TIMEOUT="$2"
+            PARSED_PIPELINE_TIMEOUT="$2"
             shift 2
             ;;
         --memory-limit)
-            MEMORY_LIMIT_MB="$2"
+            PARSED_MEMORY_LIMIT="$2"
             shift 2
             ;;
         --log-dir)
@@ -121,7 +272,35 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --verbose)
-            VERBOSE=1
+            PARSED_VERBOSE=1
+            shift
+            ;;
+        --no-atomify)
+            ATOMIFY=0
+            shift
+            ;;
+        --queue-start)
+            QUEUE_COMMAND="start"
+            shift
+            ;;
+        --queue-status)
+            QUEUE_COMMAND="status"
+            shift
+            ;;
+        --queue-pause)
+            QUEUE_COMMAND="pause"
+            shift
+            ;;
+        --queue-resume)
+            QUEUE_COMMAND="resume"
+            shift
+            ;;
+        --queue-stop)
+            QUEUE_COMMAND="stop"
+            shift
+            ;;
+        --internal-process-queue)
+            QUEUE_COMMAND="internal-process"
             shift
             ;;
         --)
@@ -133,11 +312,6 @@ while [[ $# -gt 0 ]]; do
             ;;
     esac
 done
-
-# Check for help or no arguments
-if [[ $# -eq 0 ]]; then
-    show_help
-fi
 
 # Verify minimum bash version
 if [ "${BASH_VERSION%%.*}" -lt 3 ] || { [ "${BASH_VERSION%%.*}" -eq 3 ] && [ "${BASH_VERSION#*.}" -lt 2 ]; }; then
@@ -151,8 +325,19 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Lock and state files (single queue for everything)
-# Use project-local directory to avoid conflicts between projects
+# Lock and state files
+LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
+LOCK_DIR="${LOCK_BASE_DIR}/seq-exec-${PROJECT_HASH}"
+LOCKFILE="${LOCK_DIR}/executor.lock"
+QUEUE_FILE="${LOCK_DIR}/queue.txt"
+CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
+PIPELINE_TIMEOUT_FILE="${LOCK_DIR}/pipeline_timeout.txt"
+PAUSE_FILE="${LOCK_DIR}/paused"
+RUNNING_FILE="${LOCK_DIR}/running"
+
+# Ensure lock directory exists
+mkdir -p "$LOCK_DIR"
+
 # Source .env.development if it exists
 if [ -f "${PROJECT_ROOT}/.env.development" ]; then
     set -a  # Export all variables
@@ -160,28 +345,45 @@ if [ -f "${PROJECT_ROOT}/.env.development" ]; then
     set +a
 fi
 
-# Use configured lock directory or default to project-local
-LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
-LOCK_DIR="${LOCK_BASE_DIR}/seq-exec-${PROJECT_HASH}"
-LOCKFILE="${LOCK_DIR}/executor.lock"
-QUEUE_FILE="${LOCK_DIR}/queue.txt"
-CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
-PIPELINE_TIMEOUT_FILE="${LOCK_DIR}/pipeline_timeout.txt"
+# Pipeline timeout (applies to entire chain)
+PIPELINE_TIMEOUT="${PARSED_PIPELINE_TIMEOUT:-${PIPELINE_TIMEOUT:-86400}}"  # 24 hours default
+MEMORY_LIMIT_MB="${PARSED_MEMORY_LIMIT:-${MEMORY_LIMIT_MB:-2048}}"
+TIMEOUT="${PARSED_TIMEOUT:-${TIMEOUT:-86400}}"  # 24 hours default
+VERBOSE="${PARSED_VERBOSE:-${VERBOSE:-0}}"
+
+# Create logs directory
+if [[ -n "$CUSTOM_LOG_DIR" ]]; then
+    LOGS_DIR="$CUSTOM_LOG_DIR"
+else
+    LOGS_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs}"
+fi
+mkdir -p "$LOGS_DIR"
+EXEC_LOG="${LOGS_DIR}/sequential_queue_$(date '+%Y%m%d_%H%M%S')_$$.log"
+
+# Defer handling queue management commands until functions are defined
+
+# Check for help or no arguments (but not if we have a queue command)
+if [[ $# -eq 0 ]] && [[ -z "$QUEUE_COMMAND" ]]; then
+    show_help
+fi
+
+# Get the command and its arguments
+COMMAND="${1:-}"
+shift || true
+ARGS=("$@")
+
+# Source .env.development if it exists
+if [ -f "${PROJECT_ROOT}/.env.development" ]; then
+    set -a  # Export all variables
+    source "${PROJECT_ROOT}/.env.development"
+    set +a
+fi
 
 # Pipeline timeout (applies to entire chain)
-PIPELINE_TIMEOUT="${PIPELINE_TIMEOUT:-86400}"  # 24 hours default
-MEMORY_LIMIT_MB="${MEMORY_LIMIT_MB:-2048}"
-TIMEOUT="${TIMEOUT:-86400}"  # 24 hours default
-VERBOSE="${VERBOSE:-0}"
-
-# Ensure lock directory exists
-mkdir -p "$LOCK_DIR"
-
-# Clean up stale pipeline timeout if no processes are running
-if [ -f "$PIPELINE_TIMEOUT_FILE" ] && [ ! -f "$CURRENT_PID_FILE" ]; then
-    log WARN "Found stale pipeline timeout file - cleaning up"
-    rm -f "$PIPELINE_TIMEOUT_FILE"
-fi
+PIPELINE_TIMEOUT="${PARSED_PIPELINE_TIMEOUT:-${PIPELINE_TIMEOUT:-86400}}"  # 24 hours default
+MEMORY_LIMIT_MB="${PARSED_MEMORY_LIMIT:-${MEMORY_LIMIT_MB:-2048}}"
+TIMEOUT="${PARSED_TIMEOUT:-${TIMEOUT:-86400}}"  # 24 hours default
+VERBOSE="${PARSED_VERBOSE:-${VERBOSE:-0}}"
 
 # Create logs directory
 if [[ -n "$CUSTOM_LOG_DIR" ]]; then
@@ -218,7 +420,8 @@ log() {
 # Get all descendant PIDs
 get_descendants() {
     local pid=$1
-    local children=$(pgrep -P "$pid" 2>/dev/null || true)
+    local children
+    children=$(pgrep -P "$pid" 2>/dev/null || true)
     for child in $children; do
         echo "$child"
         get_descendants "$child"
@@ -231,12 +434,13 @@ kill_process_tree() {
     local signal=${2:-TERM}
 
     # Get all descendants first
-    local all_pids="$pid $(get_descendants "$pid")"
+    local all_pids
+    all_pids="$pid $(get_descendants "$pid")"
 
     # Send signal to all
     for p in $all_pids; do
         if kill -0 "$p" 2>/dev/null; then
-            kill -$signal "$p" 2>/dev/null || true
+            kill -"$signal" "$p" 2>/dev/null || true
         fi
     done
 
@@ -323,7 +527,7 @@ check_pipeline_timeout() {
 
         # Start timeout monitor in background
         (
-            sleep $PIPELINE_TIMEOUT
+            sleep "$PIPELINE_TIMEOUT"
             if [ -f "$PIPELINE_TIMEOUT_FILE" ]; then
                 log ERROR "PIPELINE TIMEOUT after ${PIPELINE_TIMEOUT}s - killing all processes"
 
@@ -339,7 +543,8 @@ check_pipeline_timeout() {
 
                 # Kill current process
                 if [ -f "$CURRENT_PID_FILE" ]; then
-                    local current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
+                    local current
+                    current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
                     if [ "$current" -gt 0 ] && kill -0 "$current" 2>/dev/null; then
                         log WARN "Killing current process PID $current"
                         kill_process_tree "$current"
@@ -352,14 +557,18 @@ check_pipeline_timeout() {
         ) &
     else
         # Check if pipeline already timed out
-        local timeout_info=$(cat "$PIPELINE_TIMEOUT_FILE" 2>/dev/null || echo "0:0")
-        local start_time=$(echo "$timeout_info" | cut -d: -f1)
-        local timeout=$(echo "$timeout_info" | cut -d: -f2)
-        local now=$(date +%s)
+        local timeout_info
+        timeout_info=$(cat "$PIPELINE_TIMEOUT_FILE" 2>/dev/null || echo "0:0")
+        local start_time
+        start_time=$(echo "$timeout_info" | cut -d: -f1)
+        local timeout_val
+        timeout_val=$(echo "$timeout_info" | cut -d: -f2)
+        local now
+        now=$(date +%s)
         local elapsed=$((now - start_time))
 
-        if [ $elapsed -gt $timeout ]; then
-            log ERROR "Pipeline already timed out (${elapsed}s > ${timeout}s)"
+        if [ $elapsed -gt "$timeout_val" ]; then
+            log ERROR "Pipeline already timed out (${elapsed}s > ${timeout_val}s)"
             # Clean up stale timeout file
             rm -f "$PIPELINE_TIMEOUT_FILE"
             log INFO "Cleaned up stale pipeline timeout - restarting pipeline"
@@ -368,38 +577,180 @@ check_pipeline_timeout() {
             log INFO "Pipeline timeout reset to ${PIPELINE_TIMEOUT}s"
         fi
 
-        log INFO "Pipeline time remaining: $((timeout - elapsed))s"
+        log INFO "Pipeline time remaining: $((timeout_val - elapsed))s"
     fi
+}
+
+# Execute a single command from the queue
+execute_command() {
+    local cmd_string="$1"
+    local cmd_array=()
+    
+    # Parse command string into array
+    eval "cmd_array=($cmd_string)"
+    
+    local command="${cmd_array[0]}"
+    local args=("${cmd_array[@]:1}")
+    
+    # Apply special handling based on command type
+    case "$command" in
+        git)
+            log INFO "Detected git command - applying safety checks"
+            if ! check_git_safety "${args[0]:-}"; then
+                return 1
+            fi
+            ;;
+        make)
+            log INFO "Detected make command - enforcing sequential execution"
+            # Prepare make arguments
+            mapfile -t args < <(prepare_make_command "${args[@]}")
+            ;;
+        *)
+            # No special handling needed
+            ;;
+    esac
+    
+    log INFO "Executing: $command ${args[*]}"
+    
+    # Start memory monitor
+    local monitor_pid=""
+    if [ -x "${SCRIPT_DIR}/memory_monitor.sh" ]; then
+        log INFO "Starting memory monitor"
+        "${SCRIPT_DIR}/memory_monitor.sh" --pid $$ --limit "$MEMORY_LIMIT_MB" &
+        monitor_pid=$!
+    fi
+    
+    # Ensure wait_all.sh is available
+    if [ ! -x "${SCRIPT_DIR}/wait_all.sh" ]; then
+        log ERROR "wait_all.sh not found at: ${SCRIPT_DIR}/wait_all.sh"
+        log ERROR "This script requires wait_all.sh for atomic execution"
+        return 1
+    fi
+    
+    # Execute through wait_all.sh
+    "${SCRIPT_DIR}/wait_all.sh" --timeout "$TIMEOUT" -- "$command" "${args[@]}"
+    local exit_code=$?
+    
+    # Stop memory monitor
+    if [[ -n "$monitor_pid" ]]; then
+        kill "$monitor_pid" 2>/dev/null || true
+    fi
+    
+    log INFO "Command completed with exit code: $exit_code"
+    return $exit_code
+}
+
+# Process the queue
+process_queue() {
+    local overall_exit_code=0
+    
+    # Check pipeline timeout
+    check_pipeline_timeout
+    
+    while true; do
+        # Check if paused
+        while [[ -f "$PAUSE_FILE" ]]; do
+            log INFO "Queue is paused. Waiting..."
+            sleep 5
+        done
+        
+        # Check if queue is empty
+        if [[ ! -s "$QUEUE_FILE" ]]; then
+            log INFO "Queue is empty"
+            break
+        fi
+        
+        # Get next command from queue
+        local next_cmd=""
+        local next_pid=""
+        
+        # Read first line and remove it atomically
+        # Use a simple lock file approach since flock is not available on macOS
+        local lock_acquired=0
+        local lock_file="${QUEUE_FILE}.lock"
+        
+        # Try to acquire lock
+        for i in {1..30}; do
+            if mkdir "$lock_file" 2>/dev/null; then
+                lock_acquired=1
+                break
+            fi
+            sleep 0.1
+        done
+        
+        if [[ $lock_acquired -eq 1 ]]; then
+            if [[ -s "$QUEUE_FILE" ]]; then
+                IFS=: read -r next_pid _ next_cmd < "$QUEUE_FILE"
+                tail -n +2 "$QUEUE_FILE" > "${QUEUE_FILE}.tmp"
+                mv -f "${QUEUE_FILE}.tmp" "$QUEUE_FILE"
+            fi
+            rmdir "$lock_file" 2>/dev/null || true
+        else
+            log WARN "Failed to acquire queue lock after 3 seconds"
+            continue
+        fi
+        
+        if [[ -z "$next_cmd" ]]; then
+            continue
+        fi
+        
+        # Wait for lock
+        log INFO "Waiting for exclusive lock..."
+        while true; do
+            if mkdir "$LOCKFILE" 2>/dev/null; then
+                echo $$ > "$CURRENT_PID_FILE"
+                log INFO "Lock acquired"
+                break
+            fi
+            
+            # Check if current holder is alive
+            local holder_pid=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
+            if [[ $holder_pid -gt 0 ]] && ! kill -0 "$holder_pid" 2>/dev/null; then
+                log WARN "Lock holder died, cleaning up"
+                rm -f "$CURRENT_PID_FILE"
+                rmdir "$LOCKFILE" 2>/dev/null || true
+            fi
+            
+            sleep 1
+        done
+        
+        # Execute command
+        execute_command "$next_cmd"
+        local exit_code=$?
+        
+        if [[ $exit_code -ne 0 ]]; then
+            log ERROR "Command failed with exit code: $exit_code"
+            overall_exit_code=$exit_code
+            # Continue processing queue even on failure
+        fi
+        
+        # Release lock
+        rm -f "$CURRENT_PID_FILE"
+        rmdir "$LOCKFILE" 2>/dev/null || true
+        log INFO "Lock released"
+    done
+    
+    # Clean up pipeline timeout if queue is empty
+    if [[ ! -s "$QUEUE_FILE" ]]; then
+        rm -f "$PIPELINE_TIMEOUT_FILE"
+        log INFO "Pipeline complete - cleaned up timeout"
+    fi
+    
+    return $overall_exit_code
 }
 
 # Cleanup function
 cleanup() {
     local exit_code=$?
 
-    # Stop memory monitor if running
-    if [ -n "${MONITOR_PID:-}" ]; then
-        kill $MONITOR_PID 2>/dev/null || true
-    fi
+    # Don't remove from queue - commands should only be removed when executed
+    # Only clean up if we're the runner
 
-    # Remove from queue
-    if [ -f "$QUEUE_FILE" ]; then
-        grep -v "^$$:" "$QUEUE_FILE" > "${QUEUE_FILE}.tmp" 2>/dev/null || true
-        mv -f "${QUEUE_FILE}.tmp" "$QUEUE_FILE" 2>/dev/null || true
-    fi
-
-    # Release lock if we hold it
-    if [ -f "$CURRENT_PID_FILE" ]; then
-        local current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
-        if [ "$current" -eq "$$" ]; then
-            rm -f "$CURRENT_PID_FILE"
-            rmdir "$LOCKFILE" 2>/dev/null || true
-            log INFO "Lock released"
-
-            # If queue is empty, pipeline is complete
-            if [ ! -s "$QUEUE_FILE" ]; then
-                log INFO "Queue empty - pipeline complete"
-                rm -f "$PIPELINE_TIMEOUT_FILE"
-            fi
+    # Clean up running file if we're the runner
+    if [[ "$QUEUE_COMMAND" == "start" ]] && [[ -f "$RUNNING_FILE" ]]; then
+        local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
+        if [[ $runner_pid -eq $$ ]]; then
+            rm -f "$RUNNING_FILE"
         fi
     fi
 
@@ -411,116 +762,63 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
-# Main execution
+# Now handle queue management commands (functions are defined)
+if [[ -n "$QUEUE_COMMAND" ]]; then
+    case "$QUEUE_COMMAND" in
+        start) queue_start ;;
+        status) queue_status ;;
+        pause) queue_pause ;;
+        resume) queue_resume ;;
+        stop) queue_stop ;;
+        internal-process) process_queue ;;
+    esac
+    exit $?
+fi
 
-# Get the command and its arguments
-COMMAND="${1:-}"
-shift || true
-ARGS=("$@")
+# Only process commands if not a queue management command
+if [[ -z "$QUEUE_COMMAND" ]]; then
+    log INFO "Adding command to queue: $COMMAND ${ARGS[*]}"
+    log INFO "Project: $PROJECT_ROOT"
 
-# Apply special handling based on command type
-case "$COMMAND" in
-    git)
-        log INFO "Detected git command - applying safety checks"
-        if ! check_git_safety "${ARGS[0]:-}"; then
-            exit 1
-        fi
-        ;;
-    make)
-        log INFO "Detected make command - enforcing sequential execution"
-        # Prepare make arguments
-        ARGS=($(prepare_make_command "${ARGS[@]}"))
-        ;;
-    *)
-        # No special handling needed
-        ;;
-esac
-
-log INFO "Starting sequential queue for: $COMMAND ${ARGS[*]}"
-log INFO "Project: $PROJECT_ROOT"
-
-# Check pipeline timeout
-check_pipeline_timeout
-
-# Add to queue
-echo "$$:$(date '+%s'):$COMMAND ${ARGS[*]}" >> "$QUEUE_FILE"
-log INFO "Added to queue (PID $$)"
-
-# Wait for our turn - INDEFINITELY
-log INFO "Waiting for exclusive lock (will wait indefinitely)..."
-WAIT_COUNT=0
-
-while true; do
-    # Try to acquire lock
-    if mkdir "$LOCKFILE" 2>/dev/null; then
-        echo $$ > "$CURRENT_PID_FILE"
-        log INFO "Lock acquired"
-        break
-    fi
-
-    # Get current lock holder
-    HOLDER_PID=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
-
-    if [ "$HOLDER_PID" -gt 0 ]; then
-        # Check if holder is alive
-        if kill -0 "$HOLDER_PID" 2>/dev/null; then
-            # Log status periodically
-            if [ $((WAIT_COUNT % 60)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
-                cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
-                wait_time=$((WAIT_COUNT))
-                log INFO "Still waiting for PID $HOLDER_PID: $cmd (${wait_time}s elapsed)"
-
-                # Show queue position
-                if [ -f "$QUEUE_FILE" ]; then
-                    position=$(grep -n "^$$:" "$QUEUE_FILE" 2>/dev/null | cut -d: -f1 || echo "?")
-                    total=$(wc -l < "$QUEUE_FILE" 2>/dev/null || echo "?")
-                    log INFO "Queue position: $position of $total"
-                fi
+    # STEP 1: Check if command can be atomified
+    if [[ $ATOMIFY -eq 1 ]]; then
+        # Source atomifier if available
+        ATOMIFIER_SCRIPT="${SCRIPT_DIR}/tool_atomifier.sh"
+        if [[ -f "$ATOMIFIER_SCRIPT" ]]; then
+            source "$ATOMIFIER_SCRIPT"
+            
+            # Generate atomic commands
+            mapfile -t ATOMIC_COMMANDS < <(generate_atomic_commands "$COMMAND" "${ARGS[@]}" | grep "^ATOMIC:")
+            
+            [[ "${VERBOSE:-0}" -eq 1 ]] && echo "[SEQ-QUEUE] DEBUG: Generated ${#ATOMIC_COMMANDS[@]} atomic commands" >&2
+            
+            if [[ ${#ATOMIC_COMMANDS[@]} -gt 1 ]]; then
+                echo "[SEQ-QUEUE] Command will be atomified into ${#ATOMIC_COMMANDS[@]} atomic operations" >&2
+                
+                # STEP 2-7: Add all atomic commands to queue
+                cmd_count=0
+                for atomic_cmd in "${ATOMIC_COMMANDS[@]}"; do
+                    ((cmd_count++)) || true
+                    # Remove ATOMIC: prefix
+                    actual_cmd="${atomic_cmd#ATOMIC:}"
+                    
+                    # Add to queue
+                    echo "$$:$(date '+%s'):$actual_cmd" >> "$QUEUE_FILE"
+                    echo "[SEQ-QUEUE] Added atomic command $cmd_count/${#ATOMIC_COMMANDS[@]} to queue"
+                done
+                
+                echo "[SEQ-QUEUE] All ${#ATOMIC_COMMANDS[@]} atomic commands added to queue"
+                echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
+                exit 0
+            elif [[ ${#ATOMIC_COMMANDS[@]} -eq 1 ]]; then
+                # Single file - proceed with default sequence
+                log INFO "Single atomic command detected, adding to queue"
             fi
-        else
-            # Holder is dead, clean up
-            log WARN "Lock holder (PID $HOLDER_PID) died unexpectedly"
-            rm -f "$CURRENT_PID_FILE"
-            rmdir "$LOCKFILE" 2>/dev/null || true
-
-            # This is an error condition - previous process died
-            log ERROR "Previous process died - sequential chain broken"
-            # Continue to acquire lock and execute
         fi
-    else
-        # No PID file but lock exists - clean up
-        log WARN "Stale lock detected, cleaning up"
-        rmdir "$LOCKFILE" 2>/dev/null || true
     fi
 
-    sleep 1
-    ((WAIT_COUNT++))
-done
-
-# Execute the command
-log INFO "Executing: $COMMAND ${ARGS[*]}"
-
-# Start memory monitor
-# NOTE: memory_monitor.sh is NOT wrapped in wait_all.sh because:
-# 1. It needs to run in background as a monitor
-# 2. It's part of the process management infrastructure
-# 3. Wrapping it would prevent proper background execution
-if [ -x "${SCRIPT_DIR}/memory_monitor.sh" ]; then
-    log INFO "Starting memory monitor"
-    "${SCRIPT_DIR}/memory_monitor.sh" --pid $$ --limit "$MEMORY_LIMIT_MB" &
-    MONITOR_PID=$!
+    # STEP 8: DEFAULT SEQUENCE - Add single command to queue
+    echo "$$:$(date '+%s'):$COMMAND ${ARGS[*]}" >> "$QUEUE_FILE"
+    echo "[SEQ-QUEUE] Command added to queue"
+    echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
 fi
-
-# Ensure wait_all.sh is available
-if [ ! -x "${SCRIPT_DIR}/wait_all.sh" ]; then
-    log ERROR "wait_all.sh not found at: ${SCRIPT_DIR}/wait_all.sh"
-    log ERROR "This script requires wait_all.sh for atomic execution"
-    exit 1
-fi
-
-# Execute through wait_all.sh
-"${SCRIPT_DIR}/wait_all.sh" --timeout "$TIMEOUT" -- "$COMMAND" "${ARGS[@]}"
-EXIT_CODE=$?
-
-log INFO "Command completed with exit code: $EXIT_CODE"
-exit $EXIT_CODE

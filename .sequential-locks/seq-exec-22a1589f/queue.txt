@@ -1,4 +1,0 @@
-51117:1751811563:echo Starting tests
-51202:1751811569:ruff check /tmp/test_atomify_v7/test1.py
-51202:1751811569:ruff check /tmp/test_atomify_v7/test2.py
-51281:1751811574:echo Tests complete
