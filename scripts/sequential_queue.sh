@@ -1,27 +1,14 @@
 #!/usr/bin/env bash
-# sequential-executor.sh - TRUE sequential execution
+# sequential_queue.sh - Universal sequential execution queue manager
 # Version: 3.0.0
 #
-# Principles:
-# 1. Processes wait INDEFINITELY for their turn - no timeouts on lock acquisition
-# 2. Only ONE process runs at a time - no exceptions
-# 3. Pipeline timeout applies to the entire execution chain
-# 4. If pipeline times out, ALL processes are killed
-# 5. Commands should be ATOMIC - smallest possible units of work
+# This script consolidates:
+# - sequential-executor.sh (general queue management)
+# - git-safe.sh (git-specific safety checks)
+# - make-sequential.sh (make-specific handling)
 #
-# CRITICAL: This executor works with wait_all.sh to form a sequential chain.
-# Each wait_all.sh command should be atomic to minimize memory usage and
-# enable precise failure isolation.
-#
-# Example of ATOMIC commands (GOOD):
-#   sequential-executor.sh ruff format src/main.py
-#   sequential-executor.sh pytest tests/test_one.py
-#   sequential-executor.sh mypy --strict src/module.py
-#
-# Example of NON-ATOMIC commands (BAD):
-#   sequential-executor.sh ruff format .
-#   sequential-executor.sh pytest
-#   sequential-executor.sh mypy --strict src/
+# Auto-detects git and make commands for special handling while
+# maintaining a single queue for ALL operations.
 #
 set -euo pipefail
 
@@ -30,15 +17,16 @@ VERSION='3.0.0'
 # Display help message
 show_help() {
     cat << 'EOF'
-sequential-executor.sh v3.0.0 - Strict sequential command execution
+sequential_queue.sh v3.0.0 - Universal sequential execution queue
 
 USAGE:
-    sequential-executor.sh [OPTIONS] -- COMMAND [ARGS...]
+    sequential_queue.sh [OPTIONS] -- COMMAND [ARGS...]
+    sequential_queue.sh --help
 
 DESCRIPTION:
     Ensures only ONE command runs at a time across the entire project.
-    Commands wait indefinitely for their turn - no timeouts on lock acquisition.
-    Designed for atomic operations to prevent process explosions.
+    Auto-detects git and make commands for special handling.
+    Commands wait indefinitely for their turn in the queue.
 
 OPTIONS:
     --help, -h    Show this help message
@@ -47,6 +35,19 @@ ENVIRONMENT VARIABLES:
     PIPELINE_TIMEOUT      Total pipeline timeout in seconds (default: 7200)
     MEMORY_LIMIT_MB       Memory limit per process in MB (default: 2048)
     TIMEOUT               Individual command timeout in seconds (default: 1800)
+    VERBOSE               Set to 1 for verbose output
+
+SPECIAL HANDLING:
+    Git Commands:
+        - Checks for concurrent git operations
+        - Prevents git lock conflicts
+        - Handles pre-commit hooks safely
+        - Sets GIT_COMMIT_IN_PROGRESS for commits
+
+    Make Commands:
+        - Prevents parallel make execution
+        - Automatically adds -j1 if not specified
+        - Handles recursive makefiles safely
 
 PRINCIPLES:
     1. Processes wait INDEFINITELY for their turn
@@ -55,27 +56,32 @@ PRINCIPLES:
     4. Commands should be ATOMIC (smallest units of work)
 
 EXAMPLES:
-    # Format a single file (GOOD - atomic)
-    sequential-executor.sh ruff format src/main.py
+    # Git operations (auto-detected)
+    sequential_queue.sh -- git commit -m "feat: new feature"
+    sequential_queue.sh -- git push origin main
 
-    # Test a single module (GOOD - atomic)
-    sequential-executor.sh pytest tests/test_auth.py
+    # Make operations (auto-detected)
+    sequential_queue.sh -- make test
+    sequential_queue.sh -- make -j1 all
 
-    # Type check one file (GOOD - atomic)
-    sequential-executor.sh mypy --strict src/utils.py
+    # General commands
+    sequential_queue.sh -- pytest tests/test_one.py
+    sequential_queue.sh -- ruff format src/main.py
+    sequential_queue.sh -- mypy --strict src/
 
-    # Format entire codebase (BAD - not atomic)
-    sequential-executor.sh ruff format .
+ATOMIC vs NON-ATOMIC:
+    GOOD (atomic):
+        sequential_queue.sh -- ruff format src/main.py
+        sequential_queue.sh -- pytest tests/test_auth.py
+        sequential_queue.sh -- git commit -m "fix: typo"
 
-    # Run all tests (BAD - not atomic)
-    sequential-executor.sh pytest
-
-INTEGRATION:
-    Works with wait_all.sh for process monitoring and memory limits.
-    Integrates with pre-commit hooks for sequential execution.
+    BAD (non-atomic):
+        sequential_queue.sh -- ruff format .
+        sequential_queue.sh -- pytest
+        sequential_queue.sh -- make all
 
 LOG FILES:
-    Execution logs: PROJECT_ROOT/logs/sequential_executor_*.log
+    Execution logs: PROJECT_ROOT/logs/sequential_queue_*.log
     Memory logs: PROJECT_ROOT/logs/memory_monitor_*.log
 
 LOCK FILES:
@@ -101,17 +107,20 @@ fi
 # Global configuration
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Lock and state files
+# Lock and state files (single queue for everything)
 LOCK_DIR="/tmp/seq-exec-${PROJECT_HASH}"
 LOCKFILE="${LOCK_DIR}/executor.lock"
 QUEUE_FILE="${LOCK_DIR}/queue.txt"
 CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
-# PIPELINE_START_FILE="${LOCK_DIR}/pipeline_start.txt"  # Not used
 PIPELINE_TIMEOUT_FILE="${LOCK_DIR}/pipeline_timeout.txt"
 
 # Pipeline timeout (applies to entire chain)
 PIPELINE_TIMEOUT="${PIPELINE_TIMEOUT:-7200}"  # 2 hours default
+MEMORY_LIMIT_MB="${MEMORY_LIMIT_MB:-2048}"
+TIMEOUT="${TIMEOUT:-1800}"
+VERBOSE="${VERBOSE:-0}"
 
 # Ensure lock directory exists
 mkdir -p "$LOCK_DIR"
@@ -119,7 +128,7 @@ mkdir -p "$LOCK_DIR"
 # Create logs directory
 LOGS_DIR="${PROJECT_ROOT}/logs"
 mkdir -p "$LOGS_DIR"
-EXEC_LOG="${LOGS_DIR}/sequential_executor_strict_$(date '+%Y%m%d_%H%M%S')_$$.log"
+EXEC_LOG="${LOGS_DIR}/sequential_queue_$(date '+%Y%m%d_%H%M%S')_$$.log"
 
 # Colors
 RED='\033[0;31m'
@@ -139,7 +148,7 @@ log() {
         DEBUG) color=$BLUE ;;
     esac
     local msg
-    msg="[SEQ-STRICT] $(date '+%Y-%m-%d %H:%M:%S') [$level] $*"
+    msg="[SEQ-QUEUE] $(date '+%Y-%m-%d %H:%M:%S') [$level] $*"
     echo -e "${color}${msg}${NC}" >&2
     echo "$msg" >> "$EXEC_LOG"
 }
@@ -180,6 +189,69 @@ kill_process_tree() {
     done
 }
 
+# Git-specific safety checks
+check_git_safety() {
+    local git_cmd="${1:-}"
+
+    # Skip if already in a git hook to prevent deadlocks
+    if [ -n "${GIT_DIR:-}" ] || [ -n "${GIT_WORK_TREE:-}" ]; then
+        log INFO "Already in git hook - skipping safety checks"
+        return 0
+    fi
+
+    # Check for existing git operations
+    local git_procs
+    git_procs=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null || true)
+
+    for pid in $git_procs; do
+        # Skip our own process
+        [ "$pid" -eq "$$" ] && continue
+
+        local cmd
+        cmd=$(ps -p "$pid" -o args= 2>/dev/null || echo "unknown")
+        log ERROR "Git operation already in progress: PID $pid - $cmd"
+        return 1
+    done
+
+    # Check for git lock files
+    if [ -f "$PROJECT_ROOT/.git/index.lock" ]; then
+        log ERROR "Git index lock exists - another git process may be running"
+        log WARN "To force remove: rm -f $PROJECT_ROOT/.git/index.lock"
+        return 1
+    fi
+
+    # Set environment for commit hooks
+    if [[ "$git_cmd" == "commit" ]]; then
+        export GIT_COMMIT_IN_PROGRESS=1
+        export SEQUENTIAL_EXECUTOR_PID=$$
+        log INFO "Set GIT_COMMIT_IN_PROGRESS=1 for pre-commit hooks"
+    fi
+
+    return 0
+}
+
+# Make-specific handling
+prepare_make_command() {
+    local make_args=("$@")
+
+    # Check if -j is already specified
+    local has_j_flag=0
+    for arg in "${make_args[@]}"; do
+        if [[ "$arg" =~ ^-j ]]; then
+            has_j_flag=1
+            break
+        fi
+    done
+
+    # Add -j1 if not specified
+    if [ $has_j_flag -eq 0 ]; then
+        make_args+=("-j1")
+        log WARN "Added -j1 to make command for safety"
+    fi
+
+    echo "${make_args[@]}"
+}
+
 # Check and enforce pipeline timeout
 check_pipeline_timeout() {
     if [ ! -f "$PIPELINE_TIMEOUT_FILE" ]; then
@@ -205,7 +277,7 @@ check_pipeline_timeout() {
 
                 # Kill current process
                 if [ -f "$CURRENT_PID_FILE" ]; then
-                    current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
+                    local current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
                     if [ "$current" -gt 0 ] && kill -0 "$current" 2>/dev/null; then
                         log WARN "Killing current process PID $current"
                         kill_process_tree "$current"
@@ -264,8 +336,8 @@ cleanup() {
         fi
     fi
 
-    log INFO "Sequential executor exiting with code: $exit_code"
-    echo "Log saved to: $EXEC_LOG" >&2
+    log INFO "Sequential queue exiting with code: $exit_code"
+    [[ $VERBOSE -eq 1 ]] && echo "Log saved to: $EXEC_LOG" >&2
 
     exit $exit_code
 }
@@ -273,14 +345,42 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Main execution
-log INFO "Starting strict sequential executor for: $*"
+# Parse command line to extract the actual command
+if [[ "$1" == "--" ]]; then
+    shift
+fi
+
+# Get the command and its arguments
+COMMAND="${1:-}"
+shift || true
+ARGS=("$@")
+
+# Apply special handling based on command type
+case "$COMMAND" in
+    git)
+        log INFO "Detected git command - applying safety checks"
+        if ! check_git_safety "${ARGS[0]:-}"; then
+            exit 1
+        fi
+        ;;
+    make)
+        log INFO "Detected make command - enforcing sequential execution"
+        # Prepare make arguments
+        ARGS=($(prepare_make_command "${ARGS[@]}"))
+        ;;
+    *)
+        # No special handling needed
+        ;;
+esac
+
+log INFO "Starting sequential queue for: $COMMAND ${ARGS[*]}"
 log INFO "Project: $PROJECT_ROOT"
 
 # Check pipeline timeout
 check_pipeline_timeout
 
 # Add to queue
-echo "$$:$(date '+%s'):$*" >> "$QUEUE_FILE"
+echo "$$:$(date '+%s'):$COMMAND ${ARGS[*]}" >> "$QUEUE_FILE"
 log INFO "Added to queue (PID $$)"
 
 # Wait for our turn - INDEFINITELY
@@ -303,7 +403,7 @@ while true; do
         if kill -0 "$HOLDER_PID" 2>/dev/null; then
             # Log status periodically
             if [ $((WAIT_COUNT % 60)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
-                cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
+                local cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
                 wait_time=$((WAIT_COUNT))
                 log INFO "Still waiting for PID $HOLDER_PID: $cmd (${wait_time}s elapsed)"
 
@@ -335,26 +435,29 @@ while true; do
 done
 
 # Execute the command
-log INFO "Executing: $*"
-
-# Get script directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+log INFO "Executing: $COMMAND ${ARGS[*]}"
 
 # Start memory monitor
+# NOTE: memory_monitor.sh is NOT wrapped in wait_all.sh because:
+# 1. It needs to run in background as a monitor
+# 2. It's part of the process management infrastructure
+# 3. Wrapping it would prevent proper background execution
 if [ -x "${SCRIPT_DIR}/memory_monitor.sh" ]; then
     log INFO "Starting memory monitor"
-    "${SCRIPT_DIR}/memory_monitor.sh" --pid $$ --limit "${MEMORY_LIMIT_MB:-2048}" &
+    "${SCRIPT_DIR}/memory_monitor.sh" --pid $$ --limit "$MEMORY_LIMIT_MB" &
     MONITOR_PID=$!
 fi
 
-# Execute through wait_all.sh if available
-if [ -x "${SCRIPT_DIR}/wait_all.sh" ]; then
-    "${SCRIPT_DIR}/wait_all.sh" --timeout "${TIMEOUT:-1800}" -- "$@"
-    EXIT_CODE=$?
-else
-    "$@"
-    EXIT_CODE=$?
+# Ensure wait_all.sh is available
+if [ ! -x "${SCRIPT_DIR}/wait_all.sh" ]; then
+    log ERROR "wait_all.sh not found at: ${SCRIPT_DIR}/wait_all.sh"
+    log ERROR "This script requires wait_all.sh for atomic execution"
+    exit 1
 fi
+
+# Execute through wait_all.sh
+"${SCRIPT_DIR}/wait_all.sh" --timeout "$TIMEOUT" -- "$COMMAND" "${ARGS[@]}"
+EXIT_CODE=$?
 
 log INFO "Command completed with exit code: $EXIT_CODE"
 exit $EXIT_CODE

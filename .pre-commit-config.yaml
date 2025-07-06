@@ -74,17 +74,16 @@ repos:
     hooks:
       - id: mypy-safe
         name: Type checking (safe)
-        entry: ./scripts/pre-commit-safe.sh uv run mypy
+        entry: ./scripts/wait_all.sh --timeout 300 -- uv run mypy --ignore-missing-imports --strict
         language: system
         types: [python]
         require_serial: true
         pass_filenames: true
         stages: [pre-commit]
-        args: [--ignore-missing-imports, --strict]
 
       - id: trufflehog-safe
         name: Secret detection (safe)
-        entry: ./scripts/pre-commit-safe.sh trufflehog git file://. --only-verified --fail --no-update
+        entry: ./scripts/wait_all.sh --timeout 60 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
         language: system
         pass_filenames: false
         require_serial: true

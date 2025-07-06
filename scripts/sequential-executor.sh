@@ -1,1 +1,1 @@
-sequential-executor-strict.sh
+sequential_queue.sh

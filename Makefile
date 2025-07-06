@@ -15,7 +15,7 @@ NC := \033[0m # No Color
 # Atomic execution wrapper - ensures complete process cleanup
 WAIT_ALL := ./scripts/wait_all.sh
 # Make sequential wrapper - prevents concurrent make commands
-MAKE_SEQ := ./scripts/make-sequential.sh
+MAKE_SEQ := ./scripts/sequential_queue.sh --
 
 help: ## Show this help message
 	@echo -e "$(GREEN)Safe Sequential Execution Commands$(NC)"
@@ -133,7 +133,7 @@ safe-commit: check-env ## Safely commit changes using git-safe wrapper
 
 git-add: ## Safely stage all changes
 	@echo -e "$(GREEN)Staging all changes...$(NC)"
-	@./scripts/git-safe.sh add -A
+	@./scripts/sequential_queue.sh -- add -A
 
 git-commit: ## Safely commit with message (usage: make git-commit MSG="your message")
 	@if [ -z "$(MSG)" ]; then \
@@ -141,18 +141,18 @@ git-commit: ## Safely commit with message (usage: make git-commit MSG="your mess
 		exit 1; \
 	fi
 	@echo -e "$(GREEN)Committing with message: $(MSG)$(NC)"
-	@./scripts/git-safe.sh commit -m "$(MSG)"
+	@./scripts/sequential_queue.sh -- commit -m "$(MSG)"
 
 git-push: ## Safely push to remote
 	@echo -e "$(GREEN)Pushing to remote...$(NC)"
-	@./scripts/git-safe.sh push
+	@./scripts/sequential_queue.sh -- push
 
 git-status: ## Check git status safely
-	@./scripts/git-safe.sh status
+	@./scripts/sequential_queue.sh -- status
 
 git-pull: ## Safely pull from remote
 	@echo -e "$(GREEN)Pulling from remote...$(NC)"
-	@./scripts/git-safe.sh pull
+	@./scripts/sequential_queue.sh -- pull
 
 # Hidden targets for CI
 .ci-test:
