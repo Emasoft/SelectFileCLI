@@ -10,26 +10,64 @@ default_language_version:
 default_stages: [pre-commit]
 
 repos:
-  # Basic file checks first (lightweight)
-  - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v5.0.0
+  # Basic file checks first (lightweight) - wrapped in sequential queue
+  - repo: local
     hooks:
       - id: trailing-whitespace
+        name: Fix trailing whitespace
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- sed -i "" "s/[[:space:]]*$//" "$f" || exit 1; done' --
+        language: system
+        types: [text]
         stages: [pre-commit]
+        require_serial: true
+        pass_filenames: true
       - id: end-of-file-fixer
+        name: Fix end of files
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- sh -c "[ -n \"\$(tail -c1 \"$f\")\" ] && echo >> \"$f\"" || exit 1; done' --
+        language: system
+        types: [text]
         stages: [pre-commit]
+        require_serial: true
+        pass_filenames: true
       - id: check-yaml
-        args: ['--allow-multiple-documents']
+        name: Check YAML syntax
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- python -m yaml safe_load < "$f" > /dev/null || exit 1; done' --
+        language: system
+        files: '\.(yml|yaml)$'
         stages: [pre-commit]
+        require_serial: true
+        pass_filenames: true
       - id: check-added-large-files
-        args: ['--maxkb=1000']
+        name: Check for large files
+        entry: bash -c 'for f in "$@"; do size=$(wc -c < "$f"); [ $size -lt 1024000 ] || { echo "$f is too large: $size bytes"; exit 1; }; done' --
+        language: system
         stages: [pre-commit]
+        require_serial: true
+        pass_filenames: true
       - id: check-toml
+        name: Check TOML syntax
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- python -c "import toml; toml.load(open(\"$f\"))" || exit 1; done' --
+        language: system
+        files: '\.toml$'
         stages: [pre-commit]
+        require_serial: true
+        pass_filenames: true
       - id: check-json
+        name: Check JSON syntax
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- python -m json.tool "$f" > /dev/null || exit 1; done' --
+        language: system
+        files: '\.json$'
         stages: [pre-commit]
+        require_serial: true
+        pass_filenames: true
       - id: check-merge-conflict
+        name: Check for merge conflicts
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 300 -- grep -E "^(<<<<<<<|=======|>>>>>>>)" "$f" && { echo "Merge conflict markers found in $f"; exit 1; } || true; done' --
+        language: system
+        types: [text]
         stages: [pre-commit]
+        require_serial: true
+        pass_filenames: true
 
   # Update uv lockfile
   - repo: https://github.com/astral-sh/uv-pre-commit
@@ -74,7 +112,7 @@ repos:
     hooks:
       - id: mypy-safe
         name: Type checking (safe)
-        entry: ./scripts/sequential_queue.sh --timeout 7200 -- uv run mypy --ignore-missing-imports --strict
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 7200 -- uv run mypy --ignore-missing-imports --strict "$f" || exit 1; done' --
         language: system
         types: [python]
         require_serial: true
@@ -94,7 +132,7 @@ repos:
     hooks:
       - id: yamlfmt
         name: Format YAML files
-        entry: ./scripts/sequential_queue.sh --timeout 1800 -- yamlfmt
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 1800 -- yamlfmt "$f" || exit 1; done' --
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
         pass_filenames: true
@@ -103,7 +141,7 @@ repos:
 
       - id: yamllint
         name: Lint YAML files
-        entry: ./scripts/sequential_queue.sh --timeout 1800 -- uv run yamllint
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 1800 -- uv run yamllint "$f" || exit 1; done' --
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
         pass_filenames: true
@@ -112,7 +150,7 @@ repos:
 
       - id: actionlint
         name: Lint GitHub Actions workflows
-        entry: ./scripts/sequential_queue.sh --timeout 1800 -- actionlint
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 1800 -- actionlint "$f" || exit 1; done' --
         language: system
         files: '^\.github/workflows/.*\.(yml|yaml)$'
         pass_filenames: true
