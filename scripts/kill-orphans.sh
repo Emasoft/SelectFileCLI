@@ -149,8 +149,21 @@ echo "Checking for stale lock files..."
 
 LOCKS_REMOVED=0
 
+# Get project info
+PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+
+# Source .env.development if it exists
+if [ -f "${PROJECT_ROOT}/.env.development" ]; then
+    set -a  # Export all variables
+    source "${PROJECT_ROOT}/.env.development"
+    set +a
+fi
+
+# Use configured lock directory or default
+LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
+
 # Check sequential executor locks
-for lock_dir in /tmp/seq-exec-* /tmp/make-lock-*; do
+for lock_dir in "$LOCK_BASE_DIR"/seq-exec-* /tmp/seq-exec-* /tmp/make-lock-*; do
     if [[ -d "$lock_dir" ]]; then
         # Check if lock has a PID file
         if [[ -f "$lock_dir/current.pid" ]]; then

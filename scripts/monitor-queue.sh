@@ -37,7 +37,7 @@ DISPLAY SECTIONS:
        - Helps identify stuck or abandoned processes
 
     4. Lock Files
-       - Shows all lock directories in /tmp
+       - Shows all lock directories in project's .sequential-locks
        - Helps diagnose lock-related issues
 
 COLOR CODING:
@@ -72,8 +72,16 @@ fi
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
 
+# Source .env.development if it exists
+if [ -f "${PROJECT_ROOT}/.env.development" ]; then
+    set -a  # Export all variables
+    source "${PROJECT_ROOT}/.env.development"
+    set +a
+fi
+
 # State files (consistent naming across all scripts)
-LOCK_DIR="/tmp/seq-exec-${PROJECT_HASH}"
+LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
+LOCK_DIR="${LOCK_BASE_DIR}/seq-exec-${PROJECT_HASH}"
 LOCKFILE="${LOCK_DIR}/executor.lock"
 QUEUE_FILE="${LOCK_DIR}/queue.txt"
 CURRENT_PID_FILE="${LOCK_DIR}/current.pid"

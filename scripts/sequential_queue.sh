@@ -90,8 +90,8 @@ LOG FILES:
     Memory logs: PROJECT_ROOT/logs/memory_monitor_*.log
 
 LOCK FILES:
-    Lock directory: /tmp/seq-exec-PROJECT_HASH/
-    Queue file: /tmp/seq-exec-PROJECT_HASH/queue.txt
+    Lock directory: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/
+    Queue file: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/queue.txt
 
 EOF
     exit 0
@@ -152,7 +152,17 @@ PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Lock and state files (single queue for everything)
-LOCK_DIR="/tmp/seq-exec-${PROJECT_HASH}"
+# Use project-local directory to avoid conflicts between projects
+# Source .env.development if it exists
+if [ -f "${PROJECT_ROOT}/.env.development" ]; then
+    set -a  # Export all variables
+    source "${PROJECT_ROOT}/.env.development"
+    set +a
+fi
+
+# Use configured lock directory or default to project-local
+LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
+LOCK_DIR="${LOCK_BASE_DIR}/seq-exec-${PROJECT_HASH}"
 LOCKFILE="${LOCK_DIR}/executor.lock"
 QUEUE_FILE="${LOCK_DIR}/queue.txt"
 CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
@@ -166,6 +176,12 @@ VERBOSE="${VERBOSE:-0}"
 
 # Ensure lock directory exists
 mkdir -p "$LOCK_DIR"
+
+# Clean up stale pipeline timeout if no processes are running
+if [ -f "$PIPELINE_TIMEOUT_FILE" ] && [ ! -f "$CURRENT_PID_FILE" ]; then
+    log WARN "Found stale pipeline timeout file - cleaning up"
+    rm -f "$PIPELINE_TIMEOUT_FILE"
+fi
 
 # Create logs directory
 if [[ -n "$CUSTOM_LOG_DIR" ]]; then
@@ -344,7 +360,12 @@ check_pipeline_timeout() {
 
         if [ $elapsed -gt $timeout ]; then
             log ERROR "Pipeline already timed out (${elapsed}s > ${timeout}s)"
-            exit 126  # Pipeline timeout exit code
+            # Clean up stale timeout file
+            rm -f "$PIPELINE_TIMEOUT_FILE"
+            log INFO "Cleaned up stale pipeline timeout - restarting pipeline"
+            # Restart pipeline with fresh timeout
+            echo "$(date +%s):$PIPELINE_TIMEOUT" > "$PIPELINE_TIMEOUT_FILE"
+            log INFO "Pipeline timeout reset to ${PIPELINE_TIMEOUT}s"
         fi
 
         log INFO "Pipeline time remaining: $((timeout - elapsed))s"

@@ -83,7 +83,7 @@ repos:
 
       - id: trufflehog-safe
         name: Secret detection (safe)
-        entry: ./scripts/sequential_queue.sh --timeout 3600 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        entry: ./scripts/sequential_queue.sh --timeout 3600 -- trufflehog git file://. --only-verified --fail --no-update
         language: system
         pass_filenames: false
         require_serial: true
