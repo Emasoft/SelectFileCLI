@@ -39,12 +39,12 @@
 #        0 disables the timeout entirely (default).
 #
 #  --kill-signal <sig>
-#        Signal delivered when the timeout triggers.  May b#e a number (9),
-#        plain name (KILL) or “SIGKILL”.  Default: SIGTERM.#
+#        Signal delivered when the timeout triggers.  May be a number (9),
+#        plain name (KILL) or "SIGKILL".  Default: SIGTERM.
 #
 #  --retry <N>
 #        Retry the command up to N additional times after non-zero exit or a
-#        timeout.  A successful run stops the loop immediately.#
+#        timeout.  A successful run stops the loop immediately.
 #
 #  --install-deps
 #        Attempt to install any missing helper programs using the native
@@ -343,7 +343,7 @@ cleanup() {
       # Log what we're killing
       if [[ -n "${LOG_FILE:-}" ]]; then
         echo "Killing process group $pgid" >>"$LOG_FILE" 2>&1 || true
-        ps -g "$pgid" -o pid,ppid,comm 2>&1 >>"$LOG_FILE" || true
+        ps -g "$pgid" -o pid,ppid,comm >>"$LOG_FILE" 2>&1 || true
       fi
       # SIGTERM first
       kill -TERM -"$pgid" 2>/dev/null || true
@@ -428,7 +428,7 @@ error_handler() {
   cleanup
 
   # Force exit
-  exit $exit_code
+  exit "$exit_code"
 }
 
 # Set up signal handlers to ensure cleanup
@@ -466,7 +466,7 @@ find_descendants() {
       local grandchildren
       grandchildren=$(find_descendants "$child")
       if [[ -n "$grandchildren" ]]; then
-        found_pids+=($grandchildren)
+        found_pids+=("$grandchildren")
       fi
     fi
   done
@@ -497,18 +497,21 @@ sleep_short() {
 # ─── System-memory snapshot: “used_kB total_kB compressed_pages” ──────────
 sys_mem() {
   if [[ -r /proc/meminfo ]]; then                 # Linux
-    local total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
-    local avail=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
+    local total avail
+    total=$(awk '/^MemTotal:/{print $2}' /proc/meminfo)
+    avail=$(awk '/^MemAvailable:/{print $2}' /proc/meminfo)
     echo "$((total-avail)) $total 0"
   elif have vm_stat && have sysctl; then          # macOS / FreeBSD
-    local page=$(sysctl -n hw.pagesize)
+    local page total_b free inactive spec comp
+    page=$(sysctl -n hw.pagesize)
     : "${page:=4096}"                             # fallback if empty
-    local total_b=$(sysctl -n hw.memsize)
-    local free=$(vm_stat | awk '/Pages free/{print $3}' | tr -d '.')
-    local inactive=$(vm_stat | awk '/Pages inactive/{print $3}' | tr -d '.')
-    local spec=$(vm_stat | awk '/Pages speculative/{print $3}' | tr -d '.')
-    local comp=$(vm_stat | awk '/occupied by compressor/{print $5}' | tr -d '.')
-    local used_b=$(( total_b - (free+inactive+spec)*page ))
+    total_b=$(sysctl -n hw.memsize)
+    free=$(vm_stat | awk '/Pages free/{print $3}' | tr -d '.')
+    inactive=$(vm_stat | awk '/Pages inactive/{print $3}' | tr -d '.')
+    spec=$(vm_stat | awk '/Pages speculative/{print $3}' | tr -d '.')
+    comp=$(vm_stat | awk '/occupied by compressor/{print $5}' | tr -d '.')
+    local used_b
+    used_b=$(( total_b - (free+inactive+spec)*page ))
     echo "$((used_b/1024)) $((total_b/1024)) $comp"
   else                                            # fallback
     echo "0 0 0"
@@ -596,11 +599,22 @@ json_encode() {
 # ╰────────────────────────────────────────────────────────────────────────╯
 adjust_command() {
   local in_name=$1 out_name=$2
-  eval "local first=\${${in_name}[0]}"
-  eval "local -a orig=(\"\${${in_name}[@]}\")"
-  eval "${out_name}=(\"\${orig[@]}\")"   # default: unchanged
+  # Safer array handling for bash 3.2 compatibility
+  # Get first element using nameref-like behavior without bash 4 features
+  local first_var="${in_name}[0]"
+  local first="${!first_var}"
 
-  set_out() { eval "${out_name}=(\"$@\")"; }
+  # Copy array using indirect expansion
+  local array_var="${in_name}[@]"
+  local -a orig=("${!array_var}")
+
+  # Set output array to input by default
+  eval "${out_name}=(\"\${orig[@]}\")"
+
+  set_out() {
+    # Set output array with arguments
+    eval "${out_name}=(\"\$@\")"
+  }
 
   # 0) Already a launcher?
   case $first in uv|uvx|pnpm|yarn|node|go|osascript) return 0 ;; esac
@@ -668,7 +682,10 @@ run_once() {
   # Build command array from legacy or modern form
   local C_IN=()
   if [[ -n $LEGACY_CMD_STRING ]]; then
-    # Preserve quoting/escaping by re-parsing through the shell
+    # Parse legacy command string safely
+    # Note: eval is required here to handle complex quoting scenarios
+    # This is the one place where eval is necessary and safe
+    # because LEGACY_CMD_STRING comes from command line arguments
     eval "set -- $LEGACY_CMD_STRING"
     C_IN=("$@")
   else
@@ -698,7 +715,7 @@ run_once() {
   if kill -0 "$main_pid" 2>/dev/null; then
     # Try to get pgid with retries for slow-starting processes
     local retry
-    for retry in 1 2 3; do
+    for _ in 1 2 3; do
       if pgid=$(ps -p "$main_pid" -o pgid= 2>/dev/null); then
         pgid=$(echo "$pgid" | tr -d '[:space:],<')
         if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
@@ -945,7 +962,7 @@ run_once() {
 }
 
 # ───────────────────── Retry orchestration loop ──────────────────────────
-final_out= final_err= final_rc=0
+final_out='' final_err='' final_rc=0
 for (( attempt=1; ; ++attempt )); do
   # Check if run_once is defined (removed debug comment that was corrupting output)
   if ! declare -f run_once >/dev/null 2>&1; then

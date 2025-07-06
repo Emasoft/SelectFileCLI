@@ -7,6 +7,9 @@
 #
 set -euo pipefail
 
+# Store script arguments for use in functions
+SCRIPT_ARGS="$*"
+
 # Get project info
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
@@ -55,6 +58,7 @@ trap cleanup EXIT
 
 # Try to acquire lock
 acquire_lock() {
+    # Note: function doesn't use arguments, will use global script args
     local max_wait=300  # 5 minutes max wait
     local waited=0
 
@@ -76,8 +80,9 @@ acquire_lock() {
 
         # Add to queue if not already there
         if ! grep -q "^$$:" "$MAKE_QUEUE" 2>/dev/null; then
-            echo "$$:$*" >> "$MAKE_QUEUE"
-            log_info "Added to queue (PID $$): make $*"
+            # Use global script arguments (passed to main script)
+            echo "$$:$SCRIPT_ARGS" >> "$MAKE_QUEUE"
+            log_info "Added to queue (PID $$): make $SCRIPT_ARGS"
         fi
 
         # Show status every 10 seconds

@@ -94,18 +94,18 @@ check_deadlock() {
     local start_pid=$1
     local current_pid=$2
     local visited=("$@")
-    
+
     # Get who current_pid is waiting for
     if [ -f "$DEPS_FILE" ]; then
         local waiting_for=$(grep "^$current_pid:" "$DEPS_FILE" 2>/dev/null | cut -d: -f2 | head -1)
-        
+
         if [ -n "$waiting_for" ]; then
             # Check if we've come full circle
             if [ "$waiting_for" -eq "$start_pid" ]; then
                 log ERROR "DEADLOCK DETECTED: Circular dependency involving PIDs: ${visited[*]} -> $waiting_for"
                 return 0  # Deadlock found
             fi
-            
+
             # Check if we've already visited this PID (loop detection)
             for v in "${visited[@]}"; do
                 if [ "$v" -eq "$waiting_for" ]; then
@@ -113,34 +113,34 @@ check_deadlock() {
                     return 1
                 fi
             done
-            
+
             # Recurse to check the next link in the chain
             check_deadlock "$start_pid" "$waiting_for" "${visited[@]}" "$waiting_for"
             return $?
         fi
     fi
-    
+
     return 1  # No deadlock found
 }
 
 # Cleanup function
 cleanup() {
     local exit_code=$?
-    
+
     # Stop memory monitor if running
     if [ -n "${MONITOR_PID:-}" ]; then
         kill $MONITOR_PID 2>/dev/null || true
     fi
-    
+
     # Clear our dependencies
     clear_dependencies
-    
+
     # Remove from queue
     if [ -f "$QUEUE_FILE" ]; then
         grep -v "^$$:" "$QUEUE_FILE" > "${QUEUE_FILE}.tmp" 2>/dev/null || true
         mv -f "${QUEUE_FILE}.tmp" "$QUEUE_FILE" 2>/dev/null || true
     fi
-    
+
     # Release lock if we hold it
     if [ -f "$CURRENT_PID_FILE" ]; then
         local current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
@@ -150,10 +150,10 @@ cleanup() {
             log INFO "Lock released"
         fi
     fi
-    
+
     log INFO "Sequential executor exiting with code: $exit_code"
     echo "Log saved to: $EXEC_LOG" >&2
-    
+
     exit $exit_code
 }
 
@@ -180,27 +180,27 @@ while true; do
         log INFO "Lock acquired"
         break
     fi
-    
+
     # Check timeout
     ELAPSED=$(($(date +%s) - WAIT_START))
     if [ $ELAPSED -gt $MAX_LOCK_WAIT ]; then
         log ERROR "Timeout waiting for lock after ${MAX_LOCK_WAIT}s"
         exit 124  # Timeout exit code
     fi
-    
+
     # Get current lock holder
     HOLDER_PID=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
-    
+
     if [ "$HOLDER_PID" -gt 0 ]; then
         # Check if holder is alive
         if kill -0 "$HOLDER_PID" 2>/dev/null; then
             # Record that we're waiting for this holder
             record_dependency $$ "$HOLDER_PID"
-            
+
             # Periodic deadlock check
             if [ $((WAIT_COUNT % DEADLOCK_CHECK_INTERVAL)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
                 log DEBUG "Checking for deadlocks..."
-                
+
                 # Use a lock to ensure only one process checks at a time
                 if mkdir "$DEADLOCK_CHECK_FILE" 2>/dev/null; then
                     if check_deadlock $$ $$; then
@@ -211,10 +211,10 @@ while true; do
                     rmdir "$DEADLOCK_CHECK_FILE" 2>/dev/null || true
                 fi
             fi
-            
+
             # Log status periodically
             if [ $((WAIT_COUNT % 30)) -eq 0 ]; then
-                local cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
+                cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
                 log INFO "Waiting for lock held by PID $HOLDER_PID: $cmd (${ELAPSED}s elapsed)"
             fi
         else
@@ -229,7 +229,7 @@ while true; do
         log WARN "Stale lock detected, cleaning up"
         rmdir "$LOCKFILE" 2>/dev/null || true
     fi
-    
+
     sleep 1
     ((WAIT_COUNT++))
 done

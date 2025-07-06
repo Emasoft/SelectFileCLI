@@ -6,6 +6,12 @@
 #
 set -euo pipefail
 
+# Portable tac replacement function (tac not available on macOS)
+# Reverses the order of lines
+portable_tac() {
+    awk '{a[i++]=$0} END {for (j=i-1; j>=0;) print a[j--]}'
+}
+
 # Configuration
 MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-2048}  # 2GB default
 CHECK_INTERVAL=${CHECK_INTERVAL:-5}       # Check every 5 seconds
@@ -27,19 +33,22 @@ NC='\033[0m'
 
 # Log functions - write to both stdout/stderr and log file
 log_info() {
-    local msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg
+    msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
     echo -e "${GREEN}${msg}${NC}"
     echo "${msg}" >> "$LOG_FILE"
 }
 
 log_warn() {
-    local msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg
+    msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
     echo -e "${YELLOW}${msg}${NC}" >&2
     echo "WARNING: ${msg}" >> "$LOG_FILE"
 }
 
 log_error() {
-    local msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
+    local msg
+    msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
     echo -e "${RED}${msg}${NC}" >&2
     echo "ERROR: ${msg}" >> "$LOG_FILE"
 }
@@ -92,10 +101,11 @@ kill_process_tree() {
     log_warn "Killing process tree for PID $pid: $reason"
 
     # Get all descendants
-    local all_pids="$pid $(get_descendants "$pid")"
+    local all_pids
+    all_pids="$pid $(get_descendants "$pid")"
 
     # Kill in reverse order (children first)
-    for p in $(echo "$all_pids" | tr ' ' '\n' | tac); do
+    for p in $(echo "$all_pids" | tr ' ' '\n' | portable_tac); do
         if kill -0 "$p" 2>/dev/null; then
             log_warn "  Killing PID $p ($(ps -p "$p" -o comm= 2>/dev/null || echo 'unknown'))"
             kill -TERM "$p" 2>/dev/null || true
@@ -106,7 +116,7 @@ kill_process_tree() {
     sleep 2
 
     # Force kill any remaining
-    for p in $(echo "$all_pids" | tr ' ' '\n' | tac); do
+    for p in $(echo "$all_pids" | tr ' ' '\n' | portable_tac); do
         if kill -0 "$p" 2>/dev/null; then
             log_error "  Force killing PID $p"
             kill -KILL "$p" 2>/dev/null || true
@@ -120,7 +130,7 @@ monitor_processes() {
     log_info "Starting memory monitor for PID $parent_pid (limit: ${MEMORY_LIMIT_MB}MB)"
     log_info "Project: $PROJECT_ROOT"
     log_info "Log file: $LOG_FILE"
-    
+
     # Log initial process tree
     log_info "Initial process tree:"
     local all_pids="$parent_pid $(get_descendants "$parent_pid")"
@@ -131,51 +141,51 @@ monitor_processes() {
             log_info "  PID $pid: $cmd (${mem_mb}MB)"
         fi
     done
-    
+
     local check_count=0
     while kill -0 "$parent_pid" 2>/dev/null; do
         ((check_count++))
-        
+
         # Get parent and all child processes
         local all_pids="$parent_pid $(get_descendants "$parent_pid")"
         local total_mem=0
         local process_count=0
-        
+
         # Log periodic status every 10 checks
         if (( check_count % 10 == 0 )); then
             log_info "Status check #$check_count:"
         fi
-        
+
         for pid in $all_pids; do
             if kill -0 "$pid" 2>/dev/null; then
                 local mem_mb=$(get_memory_mb "$pid")
                 local cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
                 ((total_mem += mem_mb))
                 ((process_count++))
-                
+
                 # Always log to file, but only to console if high usage
                 echo "  PID $pid: $cmd = ${mem_mb}MB" >> "$LOG_FILE"
-                
+
                 # Log high memory usage to console
                 if (( mem_mb > MEMORY_LIMIT_MB / 2 )); then
                     log_warn "High memory usage: PID $pid ($cmd) using ${mem_mb}MB"
                 fi
-                
+
                 # Kill if over limit
                 if (( mem_mb > MEMORY_LIMIT_MB )); then
                     kill_process_tree "$pid" "Memory limit exceeded: ${mem_mb}MB > ${MEMORY_LIMIT_MB}MB"
                 fi
             fi
         done
-        
+
         # Log summary every 10 checks
         if (( check_count % 10 == 0 )); then
             log_info "Total: $process_count processes using ${total_mem}MB"
         fi
-        
+
         sleep "$CHECK_INTERVAL"
     done
-    
+
     log_info "Parent process $parent_pid terminated, monitor exiting"
 }
 

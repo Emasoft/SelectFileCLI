@@ -24,9 +24,10 @@
 #
 set -euo pipefail
 
-# Check bash version (require 4.0+)
-if [ "${BASH_VERSION%%.*}" -lt 4 ]; then
-    echo "ERROR: This script requires bash 4.0 or higher" >&2
+# Check bash version (require 3.2+)
+# Note: Bash 3.2 is the default on macOS
+if [ "${BASH_VERSION%%.*}" -lt 3 ] || { [ "${BASH_VERSION%%.*}" -eq 3 ] && [ "${BASH_VERSION#*.}" -lt 2 ]; }; then
+    echo "ERROR: This script requires bash 3.2 or higher" >&2
     exit 1
 fi
 
@@ -39,7 +40,7 @@ LOCK_DIR="/tmp/seq-exec-${PROJECT_HASH}"
 LOCKFILE="${LOCK_DIR}/executor.lock"
 QUEUE_FILE="${LOCK_DIR}/queue.txt"
 CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
-PIPELINE_START_FILE="${LOCK_DIR}/pipeline_start.txt"
+# PIPELINE_START_FILE="${LOCK_DIR}/pipeline_start.txt"  # Not used
 PIPELINE_TIMEOUT_FILE="${LOCK_DIR}/pipeline_timeout.txt"
 
 # Pipeline timeout (applies to entire chain)
@@ -70,7 +71,8 @@ log() {
         INFO)  color=$GREEN ;;
         DEBUG) color=$BLUE ;;
     esac
-    local msg="[SEQ-STRICT] $(date '+%Y-%m-%d %H:%M:%S') [$level] $*"
+    local msg
+    msg="[SEQ-STRICT] $(date '+%Y-%m-%d %H:%M:%S') [$level] $*"
     echo -e "${color}${msg}${NC}" >&2
     echo "$msg" >> "$EXEC_LOG"
 }
@@ -126,7 +128,7 @@ check_pipeline_timeout() {
 
                 # Kill all processes in queue
                 if [ -f "$QUEUE_FILE" ]; then
-                    while IFS=: read -r pid ts cmd; do
+                    while IFS=: read -r pid _ cmd; do
                         if kill -0 "$pid" 2>/dev/null; then
                             log WARN "Killing queued process PID $pid"
                             kill_process_tree "$pid"
@@ -234,8 +236,8 @@ while true; do
         if kill -0 "$HOLDER_PID" 2>/dev/null; then
             # Log status periodically
             if [ $((WAIT_COUNT % 60)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
-                local cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
-                local wait_time=$((WAIT_COUNT))
+                cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
+                wait_time=$((WAIT_COUNT))
                 log INFO "Still waiting for PID $HOLDER_PID: $cmd (${wait_time}s elapsed)"
 
                 # Show queue position

@@ -13,7 +13,7 @@ if [ -n "${GIT_DIR:-}" ] || [ -n "${GIT_WORK_TREE:-}" ]; then
 fi
 
 # For commits, set flag so pre-commit hooks know they're part of this operation
-if [[ "$1" == "commit" ]]; then
+if [[ $# -gt 0 ]] && [[ "$1" == "commit" ]]; then
     export GIT_COMMIT_IN_PROGRESS=1
     export SEQUENTIAL_EXECUTOR_PID=$$  # Prevent nested sequential execution
 fi
@@ -39,12 +39,14 @@ mkdir -p "$GIT_LOCK_DIR"
 # Function to check for existing git operations
 check_existing_git_operations() {
     # Check for any running git processes
-    local git_procs=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null || true)
+    local git_procs
+    git_procs=$(pgrep -f "git (commit|merge|rebase|cherry-pick|push|pull)" 2>/dev/null || true)
 
     if [ -n "$git_procs" ]; then
         echo -e "${RED}ERROR: Git operations already in progress:${NC}" >&2
         for pid in $git_procs; do
-            local cmd=$(ps -p "$pid" -o args= 2>/dev/null || echo "unknown")
+            local cmd
+            cmd=$(ps -p "$pid" -o args= 2>/dev/null || echo "unknown")
             echo -e "  ${YELLOW}PID $pid:${NC} $cmd" >&2
         done
         return 1
@@ -60,8 +62,10 @@ check_existing_git_operations() {
     # Check for our own lock
     if [ -d "$GIT_LOCKFILE" ]; then
         if [ -f "$GIT_OPERATION_FILE" ]; then
-            local current_op=$(cat "$GIT_OPERATION_FILE" 2>/dev/null || echo "unknown")
-            local pid=$(echo "$current_op" | cut -d: -f1)
+            local current_op
+            current_op=$(cat "$GIT_OPERATION_FILE" 2>/dev/null || echo "unknown")
+            local pid
+            pid=$(echo "$current_op" | cut -d: -f1)
 
             # Check if the process is still alive
             if kill -0 "$pid" 2>/dev/null; then
@@ -135,7 +139,7 @@ echo -e "${GREEN}[GIT-SAFE]${NC} Executing: git $*"
 
 # Get script directory for sequential executor
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SEQUENTIAL_EXECUTOR="${SCRIPT_DIR}/sequential-executor.sh"
+# SEQUENTIAL_EXECUTOR="${SCRIPT_DIR}/sequential-executor.sh"  # Not used directly
 WAIT_ALL="${SCRIPT_DIR}/wait_all.sh"
 
 # Use wait_all.sh for atomic execution
