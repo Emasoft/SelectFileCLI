@@ -12,6 +12,14 @@ set -euo pipefail
 
 VERSION='8.1.0'
 
+# Constants
+readonly DEFAULT_LIST_LIMIT=20
+readonly DEFAULT_WATCH_INTERVAL=3
+readonly INTERACTIVE_RUN_LIMIT=20
+readonly DEFAULT_TIMEOUT=86400
+readonly DEFAULT_MEMORY_LIMIT_MB=2048
+readonly DEFAULT_PIPELINE_TIMEOUT=86400
+
 # Display help message
 show_help() {
     cat << 'EOF'
@@ -190,6 +198,93 @@ queue_status() {
     fi
 }
 
+# Helper function to load metadata from a file into variables
+# Usage: load_metadata <file_path>
+# Sets: RUN_ID, START_TIME, PID, STATUS, PROJECT, END_TIME, DURATION, EXIT_CODE, BRANCH, WORKFLOW
+load_metadata() {
+    local meta_file="$1"
+    
+    # Reset variables
+    RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE="" BRANCH="" WORKFLOW=""
+    JOB_ID="" COMMAND="" LOG_FILE=""  # Job-specific fields
+    
+    if [[ ! -f "$meta_file" ]]; then
+        return 1
+    fi
+    
+    while IFS='=' read -r key value; do
+        case "$key" in
+            RUN_ID) RUN_ID="$value" ;;
+            START_TIME) START_TIME="$value" ;;
+            PID) PID="$value" ;;
+            STATUS) STATUS="$value" ;;
+            PROJECT) PROJECT="$value" ;;
+            END_TIME) END_TIME="$value" ;;
+            DURATION) DURATION="$value" ;;
+            EXIT_CODE) EXIT_CODE="$value" ;;
+            BRANCH) BRANCH="$value" ;;
+            WORKFLOW) WORKFLOW="$value" ;;
+            # Job-specific fields
+            JOB_ID) JOB_ID="$value" ;;
+            SESSION_ID) RUN_ID="$value" ;;  # Handle old field name
+            COMMAND) COMMAND="$value" ;;
+            LOG_FILE) LOG_FILE="$value" ;;
+        esac
+    done < "$meta_file"
+    
+    return 0
+}
+
+# Helper function to get status display (icon and color)
+# Usage: get_status_display <status> <exit_code>
+# Returns: Sets STATUS_ICON and STATUS_COLOR variables
+get_status_display() {
+    local status="$1"
+    local exit_code="${2:-0}"
+    
+    case $status in
+        running) 
+            STATUS_ICON="⚡"
+            STATUS_COLOR="$YELLOW" 
+            ;;
+        completed)
+            if [[ "$exit_code" -eq 0 ]]; then
+                STATUS_ICON="✓"
+                STATUS_COLOR="$GREEN"
+            else
+                STATUS_ICON="✗"
+                STATUS_COLOR="$RED"
+            fi
+            ;;
+        stopped) 
+            STATUS_ICON="⊘"
+            STATUS_COLOR="$YELLOW" 
+            ;;
+        *) 
+            STATUS_ICON="?"
+            STATUS_COLOR="$NC" 
+            ;;
+    esac
+}
+
+# Helper function to calculate duration between two timestamps
+# Usage: calculate_duration <start_time> <end_time>
+# Returns: Sets DURATION_STR variable
+calculate_duration() {
+    local start_time="$1"
+    local end_time="$2"
+    
+    local start_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$start_time" "+%s" 2>/dev/null || date -d "$start_time" "+%s")
+    local end_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$end_time" "+%s" 2>/dev/null || date -d "$end_time" "+%s")
+    local duration=$((end_epoch - start_epoch))
+    local hours=$((duration / 3600))
+    local minutes=$(((duration % 3600) / 60))
+    local seconds=$((duration % 60))
+    
+    DURATION_STR="${hours}h ${minutes}m ${seconds}s"
+}
+
+# Queue management functions
 queue_start() {
     # Check if already running
     if [[ -f "$RUNNING_FILE" ]]; then
@@ -411,8 +506,23 @@ reopen_queue() {
 }
 
 # List runs (similar to gh run list)
+# Shows recent queue runs with filtering and formatting options
+# 
+# Arguments:
+#   $1 - limit: Maximum number of runs to show (default: 20)
+#   $2 - status_filter: Filter by status (running, completed, stopped)
+#   $3 - branch_filter: Filter by git branch
+#   $4 - workflow_filter: Filter by workflow name
+#   $5 - json_output: Output as JSON (true/false)
+#   $6 - json_fields: Specific JSON fields to output
+#   $7 - template: Go template for formatting (unused)
+#   $8 - all_workflows: Include all workflows (true/false)
+#
+# Returns:
+#   0 on success, 1 on error
+#   Outputs formatted run list to stdout
 list_runs() {
-    local limit="${1:-20}"
+    local limit="${1:-$DEFAULT_LIST_LIMIT}"
     local status_filter="${2:-}"
     local branch_filter="${3:-}"
     local workflow_filter="${4:-}"
@@ -455,22 +565,8 @@ list_runs() {
         [[ $count -ge $limit ]] && break
         
         local meta_file="${RUNS_DIR}/${run}/metadata.txt"
-        # Load run metadata
-        local RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE="" BRANCH="" WORKFLOW=""
-        while IFS='=' read -r key value; do
-            case "$key" in
-                RUN_ID) RUN_ID="$value" ;;
-                START_TIME) START_TIME="$value" ;;
-                PID) PID="$value" ;;
-                STATUS) STATUS="$value" ;;
-                PROJECT) PROJECT="$value" ;;
-                END_TIME) END_TIME="$value" ;;
-                DURATION) DURATION="$value" ;;
-                EXIT_CODE) EXIT_CODE="$value" ;;
-                BRANCH) BRANCH="$value" ;;
-                WORKFLOW) WORKFLOW="$value" ;;
-            esac
-        done < "$meta_file"
+        # Load run metadata using helper function
+        load_metadata "$meta_file" || continue
         
         # Apply filters
         if [[ -n "$status_filter" ]] && [[ "$STATUS" != "$status_filter" ]]; then
@@ -509,23 +605,10 @@ list_runs() {
             json_array+="\"duration\":\"${DURATION:-}\","
             json_array+="\"exitCode\":${EXIT_CODE:-0}}"
         else
-            # Terminal output
-            local status_icon=""
-            local status_color=""
-            case $STATUS in
-                running) status_icon="⚡"; status_color="$YELLOW" ;;
-                completed)
-                    if [[ "${EXIT_CODE:-0}" -eq 0 ]]; then
-                        status_icon="✓"; status_color="$GREEN"
-                    else
-                        status_icon="✗"; status_color="$RED"
-                    fi
-                    ;;
-                stopped) status_icon="⊘"; status_color="$YELLOW" ;;
-                *) status_icon="?"; status_color="$NC" ;;
-            esac
+            # Terminal output - use helper for status display
+            get_status_display "$STATUS" "${EXIT_CODE:-0}"
             
-            printf "${status_color}%s${NC} %-20s %-10s %s" "$status_icon" "$RUN_ID" "$STATUS" "$START_TIME"
+            printf "${STATUS_COLOR}%s${NC} %-20s %-10s %s" "$STATUS_ICON" "$RUN_ID" "$STATUS" "$START_TIME"
             if [[ -n "$BRANCH" ]]; then
                 printf " (branch: %s)" "$BRANCH"
             fi
@@ -548,9 +631,20 @@ list_runs() {
 }
 
 # Watch run progress (similar to gh run watch)
+# Monitors a queue run in real-time with automatic refresh
+#
+# Arguments:
+#   $1 - run_id: ID of the run to watch (optional, defaults to latest running)
+#   $2 - interval: Refresh interval in seconds (default: 3)
+#   $3 - exit_status: Exit with same status as run (true/false)
+#   $4 - compact: Show only failed/relevant steps (true/false)
+#
+# Returns:
+#   0 on success, or run's exit code if exit_status is true
+#   Displays live updating run status to stdout
 watch_run() {
     local run_id="$1"
-    local interval="${2:-3}"
+    local interval="${2:-$DEFAULT_WATCH_INTERVAL}"
     local exit_status="${3:-false}"
     local compact="${4:-false}"
     
@@ -586,22 +680,8 @@ watch_run() {
         # Clear screen
         printf "\033c"
         
-        # Load run metadata
-        local RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE="" BRANCH="" WORKFLOW=""
-        while IFS='=' read -r key value; do
-            case "$key" in
-                RUN_ID) RUN_ID="$value" ;;
-                START_TIME) START_TIME="$value" ;;
-                PID) PID="$value" ;;
-                STATUS) STATUS="$value" ;;
-                PROJECT) PROJECT="$value" ;;
-                END_TIME) END_TIME="$value" ;;
-                DURATION) DURATION="$value" ;;
-                EXIT_CODE) EXIT_CODE="$value" ;;
-                BRANCH) BRANCH="$value" ;;
-                WORKFLOW) WORKFLOW="$value" ;;
-            esac
-        done < "$meta_file"
+        # Load run metadata using helper
+        load_metadata "$meta_file"
         
         # Display header
         echo "Watching run: $RUN_ID"
@@ -639,22 +719,10 @@ watch_run() {
                     continue
                 fi
                 
-                # Job status icon
-                local job_icon=""
-                local job_color=""
-                case $JOB_STATUS in
-                    running) job_icon="⚡"; job_color="$YELLOW" ;;
-                    completed)
-                        if [[ "${JOB_EXIT:-0}" -eq 0 ]]; then
-                            job_icon="✓"; job_color="$GREEN"
-                        else
-                            job_icon="✗"; job_color="$RED"
-                        fi
-                        ;;
-                    *) job_icon="?"; job_color="$NC" ;;
-                esac
+                # Use helper for job status display
+                get_status_display "$JOB_STATUS" "${JOB_EXIT:-0}"
                 
-                printf "${job_color}%s${NC} %-20s %s\n" "$job_icon" "$JOB_ID" "$JOB_COMMAND"
+                printf "${STATUS_COLOR}%s${NC} %-20s %s\n" "$STATUS_ICON" "$JOB_ID" "$JOB_COMMAND"
                 ((job_count++)) || true
             done
         fi
@@ -685,6 +753,18 @@ watch_run() {
 }
 
 # View runs and jobs (similar to gh run view)
+# Displays detailed information about runs and jobs with optional log viewing
+#
+# Arguments:
+#   $1 - run_id: ID of the run to view (optional, interactive if not provided)
+#   $2 - job_id: ID of a specific job to view
+#   $3 - show_log: Show full logs (true/false)
+#   $4 - show_failed: Show only failed job logs (true/false)
+#   $5 - verbose: Show detailed job steps (true/false)
+#
+# Returns:
+#   0 on success, 1 on error
+#   Displays run/job information to stdout
 view_runs() {
     local run_id="$1"
     local job_id="$2"
@@ -702,7 +782,7 @@ view_runs() {
         local runs=()
         if [[ -d "$RUNS_DIR" ]]; then
             # Get runs sorted by date (newest first)
-            for run_dir in $(ls -1t "$RUNS_DIR" 2>/dev/null | head -20); do
+            for run_dir in $(ls -1t "$RUNS_DIR" 2>/dev/null | head -$INTERACTIVE_RUN_LIMIT); do
                 if [[ -f "${RUNS_DIR}/${run_dir}/metadata.txt" ]]; then
                     runs+=("$run_dir")
                 fi
@@ -718,36 +798,13 @@ view_runs() {
         local i=1
         for run in "${runs[@]}"; do
             local meta_file="${RUNS_DIR}/${run}/metadata.txt"
-            # Load run metadata
-            local RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE=""
-            while IFS='=' read -r key value; do
-                case "$key" in
-                    RUN_ID) RUN_ID="$value" ;;
-                    START_TIME) START_TIME="$value" ;;
-                    PID) PID="$value" ;;
-                    STATUS) STATUS="$value" ;;
-                    PROJECT) PROJECT="$value" ;;
-                    END_TIME) END_TIME="$value" ;;
-                    DURATION) DURATION="$value" ;;
-                    EXIT_CODE) EXIT_CODE="$value" ;;
-                esac
-            done < "$meta_file"
+            # Load run metadata using helper
+            load_metadata "$meta_file" || continue
 
-            local status_color=""
-            case $STATUS in
-                running) status_color="$GREEN" ;;
-                completed)
-                    if [[ "${EXIT_CODE:-0}" -eq 0 ]]; then
-                        status_color="$GREEN"
-                    else
-                        status_color="$RED"
-                    fi
-                    ;;
-                stopped) status_color="$YELLOW" ;;
-                *) status_color="$NC" ;;
-            esac
+            # Get status display using helper
+            get_status_display "$STATUS" "${EXIT_CODE:-0}"
 
-            printf "%2d. %s ${status_color}%-10s${NC} %s" "$i" "$RUN_ID" "$STATUS" "$START_TIME"
+            printf "%2d. %s ${STATUS_COLOR}%-10s${NC} %s" "$i" "$RUN_ID" "$STATUS" "$START_TIME"
             if [[ -n "${DURATION:-}" ]]; then
                 printf " (Duration: %s)" "$DURATION"
             fi
@@ -782,7 +839,17 @@ view_runs() {
     fi
 }
 
-# View a specific run/run
+# View a specific run
+# Displays detailed information about a single run including all its jobs
+#
+# Arguments:
+#   $1 - run_id: ID of the run to view
+#   $2 - show_log: Show full run log (true/false)
+#   $3 - show_failed: Show only failed job logs (true/false)
+#   $4 - verbose: Show detailed information (true/false)
+#
+# Returns:
+#   0 on success, 1 if run not found
 view_run() {
     local run_id="$1"
     local show_log="$2"
@@ -795,20 +862,8 @@ view_run() {
         return 1
     fi
 
-    # Load run metadata
-    local RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE=""
-    while IFS='=' read -r key value; do
-        case "$key" in
-            RUN_ID) RUN_ID="$value" ;;
-            START_TIME) START_TIME="$value" ;;
-            PID) PID="$value" ;;
-            STATUS) STATUS="$value" ;;
-            PROJECT) PROJECT="$value" ;;
-            END_TIME) END_TIME="$value" ;;
-            DURATION) DURATION="$value" ;;
-            EXIT_CODE) EXIT_CODE="$value" ;;
-        esac
-    done < "$meta_file"
+    # Load run metadata using helper
+    load_metadata "$meta_file"
 
     echo "Run: $RUN_ID"
     echo "========================================"
@@ -905,6 +960,15 @@ view_run() {
 }
 
 # View a specific job
+# Displays detailed information about a single job
+#
+# Arguments:
+#   $1 - job_id: ID of the job to view
+#   $2 - show_log: Show full job log (true/false)
+#   $3 - verbose: Show detailed information (true/false)
+#
+# Returns:
+#   0 on success, 1 if job not found
 view_job() {
     local job_id="$1"
     local show_log="$2"
@@ -962,7 +1026,7 @@ view_job() {
             echo "========"
             cat "$job_log_file"
         else
-            echo "Job log file not found: ${job_meta[LOG_FILE]}"
+            echo "Job log file not found: $job_log_file"
         fi
     fi
 }
@@ -980,7 +1044,7 @@ VIEW_JOB_ID=""
 VIEW_LOG=false
 VIEW_LOG_FAILED=false
 VIEW_VERBOSE=false
-LIST_LIMIT=20
+LIST_LIMIT=$DEFAULT_LIST_LIMIT
 LIST_STATUS=""
 LIST_BRANCH=""
 LIST_WORKFLOW=""
@@ -989,7 +1053,7 @@ LIST_JSON_FIELDS=""
 LIST_TEMPLATE=""
 LIST_ALL_WORKFLOWS=false
 WATCH_RUN_ID=""
-WATCH_INTERVAL=3
+WATCH_INTERVAL=$DEFAULT_WATCH_INTERVAL
 WATCH_EXIT_STATUS=false
 WATCH_COMPACT=false
 
@@ -1212,9 +1276,9 @@ if [ -f "${PROJECT_ROOT}/.env.development" ]; then
 fi
 
 # Pipeline timeout (applies to entire chain)
-PIPELINE_TIMEOUT="${PARSED_PIPELINE_TIMEOUT:-${PIPELINE_TIMEOUT:-86400}}"  # 24 hours default
-MEMORY_LIMIT_MB="${PARSED_MEMORY_LIMIT:-${MEMORY_LIMIT_MB:-2048}}"
-TIMEOUT="${PARSED_TIMEOUT:-${TIMEOUT:-86400}}"  # 24 hours default
+PIPELINE_TIMEOUT="${PARSED_PIPELINE_TIMEOUT:-${PIPELINE_TIMEOUT:-$DEFAULT_PIPELINE_TIMEOUT}}"
+MEMORY_LIMIT_MB="${PARSED_MEMORY_LIMIT:-${MEMORY_LIMIT_MB:-$DEFAULT_MEMORY_LIMIT_MB}}"
+TIMEOUT="${PARSED_TIMEOUT:-${TIMEOUT:-$DEFAULT_TIMEOUT}}"
 VERBOSE="${PARSED_VERBOSE:-${VERBOSE:-0}}"
 
 # Create logs directory
@@ -1237,28 +1301,6 @@ fi
 COMMAND="${1:-}"
 shift || true
 ARGS=("$@")
-
-# Source .env.development if it exists
-if [ -f "${PROJECT_ROOT}/.env.development" ]; then
-    set -a  # Export all variables
-    source "${PROJECT_ROOT}/.env.development"
-    set +a
-fi
-
-# Pipeline timeout (applies to entire chain)
-PIPELINE_TIMEOUT="${PARSED_PIPELINE_TIMEOUT:-${PIPELINE_TIMEOUT:-86400}}"  # 24 hours default
-MEMORY_LIMIT_MB="${PARSED_MEMORY_LIMIT:-${MEMORY_LIMIT_MB:-2048}}"
-TIMEOUT="${PARSED_TIMEOUT:-${TIMEOUT:-86400}}"  # 24 hours default
-VERBOSE="${PARSED_VERBOSE:-${VERBOSE:-0}}"
-
-# Create logs directory
-if [[ -n "$CUSTOM_LOG_DIR" ]]; then
-    LOGS_DIR="$CUSTOM_LOG_DIR"
-else
-    LOGS_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs}"
-fi
-mkdir -p "$LOGS_DIR"
-EXEC_LOG="${LOGS_DIR}/sequential_queue_$(date '+%Y%m%d_%H%M%S')_$$.log"
 
 # Colors
 RED='\033[0;31m'
@@ -1764,5 +1806,6 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
     echo "[SEQ-QUEUE] Command added to queue"
     echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
 fi
+
 
 

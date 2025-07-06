@@ -82,6 +82,9 @@ logs/
 # UV
 uv.lock
 
+# Sequential locks (runtime data - never commit)
+.sequential-locks/
+
 # Backup files
 *.bak
 bak/
