@@ -93,3 +93,26 @@ CLAUDE.md
 snapshot_report.html
 .pre-commit-logs/
 example_error_handling.py
+
+# Sequential Pipeline
+logs/
+*.log
+.env.development
+.env.local
+
+# Private documentation
+CLAUDE.md
+SEQUENTIAL_PRECOMMIT_SETUP_v3.md
+DOCS_DEV/
+
+# Python
+__pycache__/
+*.py[cod]
+.coverage
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual environments
+.venv/
+venv/

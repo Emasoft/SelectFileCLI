@@ -80,3 +80,9 @@ exclude = [
 [tool.deptry]
 ignore = ["DEP002", "DEP003"]  # Ignore unused dependencies and transitive dependencies
 known_first_party = ["selectfilecli"]
+
+[tool.pytest.ini_options]
+addopts = "-v --strict-markers --tb=short"
+timeout = 300
+# Force sequential execution
+workers = 1

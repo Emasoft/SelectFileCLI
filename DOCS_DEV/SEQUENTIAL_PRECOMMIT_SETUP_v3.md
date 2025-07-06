@@ -19,14 +19,15 @@ A comprehensive solution for preventing process explosions, memory exhaustion, a
 └────────────────────┬───────────────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│              Sequential Executor                            │
+│            sequential_queue.sh (Queue Manager)              │
 │  • Queue management                                         │
 │  • Lock enforcement                                         │
 │  • Pipeline timeout                                         │
+│  • Auto-detects git/make commands                          │
 └────────────────────┬───────────────────────────────────────┘
                      ▼
 ┌─────────────────────────────────────────────────────────────┐
-│                 wait_all.sh                                 │
+│          wait_all.sh (Atomic Execution Unit)               │
 │  • Process group isolation                                  │
 │  • Complete cleanup                                         │
 │  • Memory tracking                                          │
@@ -231,7 +232,11 @@ scripts/
 
 ### Pre-commit Configuration (.pre-commit-config.yaml)
 
-**IMPORTANT**: All pre-commit hooks must use `sequential_queue.sh` (not `wait_all.sh`) to ensure proper queuing and prevent concurrent execution.
+**Architecture Note**:
+- `wait_all.sh` is the atomic execution unit for single commands with complete cleanup
+- `sequential_queue.sh` is the queue manager that uses `wait_all.sh` internally to execute commands one at a time
+- For pre-commit hooks, using `sequential_queue.sh` is recommended as it provides queue management, pipeline timeouts, and better logging
+- You can use `wait_all.sh` directly for simple single commands, but `sequential_queue.sh` is better for complex pipelines
 
 ```yaml
 default_language_version:
@@ -262,7 +267,7 @@ repos:
     hooks:
       - id: format-python-atomic
         name: Format Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 3600 -- ruff format "$f" || exit 1; done' --
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff format "$f" || exit 1; done' --
         language: system
         types: [python]
         require_serial: true
@@ -270,7 +275,7 @@ repos:
 
       - id: lint-python-atomic
         name: Lint Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 3600 -- ruff check --fix "$f" || exit 1; done' --
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff check --fix "$f" || exit 1; done' --
         language: system
         types: [python]
         require_serial: true
@@ -278,21 +283,21 @@ repos:
 
       - id: deptry-check
         name: Check dependencies with deptry
-        entry: ./scripts/wait_all.sh --timeout 7200 -- deptry .
+        entry: ./scripts/sequential_queue.sh --timeout 7200 -- deptry .
         language: system
         pass_filenames: false
         always_run: true
 
       - id: type-check-safe
         name: Type checking (safe)
-        entry: ./scripts/wait_all.sh --timeout 7200 -- mypy --strict
+        entry: ./scripts/sequential_queue.sh --timeout 7200 -- mypy --strict
         language: system
         types: [python]
         pass_filenames: true
 
       - id: secret-detection-safe
         name: Secret detection (safe)
-        entry: ./scripts/wait_all.sh --timeout 3600 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        entry: ./scripts/sequential_queue.sh --timeout 3600 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
         language: system
         pass_filenames: false
 
@@ -304,14 +309,14 @@ repos:
 
       - id: lint-yaml-safe
         name: Lint YAML files
-        entry: ./scripts/wait_all.sh --timeout 1800 -- yamllint
+        entry: ./scripts/sequential_queue.sh --timeout 1800 -- yamllint
         language: system
         types: [yaml]
         pass_filenames: true
 
       - id: lint-actions-safe
         name: Lint GitHub Actions workflows
-        entry: ./scripts/wait_all.sh --timeout 1800 -- actionlint
+        entry: ./scripts/sequential_queue.sh --timeout 1800 -- actionlint
         language: system
         pass_filenames: false
 ```
@@ -382,7 +387,7 @@ MAKE_SEQ := ./scripts/sequential_queue.sh -- make
 format:
 	@echo "Formatting code..."
 	@find src tests -name "*.py" -type f | while read f; do \
-		$(WAIT_ALL) --timeout 30 -- ruff format "$$f" || exit 1; \
+		$(WAIT_ALL) --timeout 3600 -- ruff format "$$f" || exit 1; \
 	done
 
 lint:
@@ -396,7 +401,7 @@ test:
 
 build:
 	@echo "Building package..."
-	@$(WAIT_ALL) --timeout 300 -- uv build
+	@$(WAIT_ALL) --timeout 7200 -- uv build
 
 # Use make-sequential for recursive makes
 all:
