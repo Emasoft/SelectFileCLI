@@ -307,6 +307,11 @@ SPAWNED_PIDS=()
 SPAWNED_PGIDS=()
 CLEANUP_IN_PROGRESS=0
 
+# Store our own PID and parent PID to avoid killing them
+WAIT_ALL_PID=$$
+WAIT_ALL_PPID=$PPID
+WAIT_ALL_PGID=$(ps -p $$ -o pgid= 2>/dev/null | tr -d '[:space:],<' || echo 0)
+
 # Comprehensive cleanup that ALWAYS kills all spawned processes
 cleanup() {
   # Prevent recursive cleanup
@@ -326,6 +331,10 @@ cleanup() {
   local pgid
   for pgid in "${SPAWNED_PGIDS[@]:-}"; do
     if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
+      # Skip our own process group and parent's process group
+      if [[ "$pgid" == "$WAIT_ALL_PGID" ]]; then
+        continue
+      fi
       # Log what we're killing
       if [[ -n "${LOG_FILE:-}" ]]; then
         echo "Killing process group $pgid" >>"$LOG_FILE" 2>&1 || true
@@ -342,6 +351,10 @@ cleanup() {
   # Force kill any remaining process groups
   for pgid in "${SPAWNED_PGIDS[@]:-}"; do
     if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
+      # Skip our own process group and parent's process group
+      if [[ "$pgid" == "$WAIT_ALL_PGID" ]]; then
+        continue
+      fi
       # Check if any processes still exist in this group
       if ps -g "$pgid" >/dev/null 2>&1; then
         if [[ -n "${LOG_FILE:-}" ]]; then
@@ -356,6 +369,10 @@ cleanup() {
   local pid
   for pid in "${SPAWNED_PIDS[@]:-}"; do
     if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      # Skip our own PID and parent PID
+      if [[ "$pid" == "$WAIT_ALL_PID" ]] || [[ "$pid" == "$WAIT_ALL_PPID" ]]; then
+        continue
+      fi
       if [[ -n "${LOG_FILE:-}" ]]; then
         echo "Killing individual process $pid" >>"$LOG_FILE" 2>&1 || true
       fi
@@ -679,8 +696,10 @@ run_once() {
       if pgid=$(ps -p "$main_pid" -o pgid= 2>/dev/null); then
         pgid=$(echo "$pgid" | tr -d '[:space:],<')
         if [[ -n "$pgid" ]] && [[ "$pgid" -gt 0 ]]; then
-          # Track the process group
-          SPAWNED_PGIDS+=("$pgid")
+          # Track the process group (unless it's our own)
+          if [[ "$pgid" != "$WAIT_ALL_PGID" ]]; then
+            SPAWNED_PGIDS+=("$pgid")
+          fi
 
           # IMMEDIATELY scan for child processes
           local ps_output
@@ -742,8 +761,11 @@ run_once() {
             fi
           done
           if (( ! already_tracked )); then
-            SPAWNED_PIDS+=("$desc_pid")
-            (( VERBOSE )) && echo "[$SCRIPT_NAME] Found descendant process: PID $desc_pid" >&2
+            # Skip our own PID and parent PID
+            if [[ "$desc_pid" != "$WAIT_ALL_PID" ]] && [[ "$desc_pid" != "$WAIT_ALL_PPID" ]]; then
+              SPAWNED_PIDS+=("$desc_pid")
+              (( VERBOSE )) && echo "[$SCRIPT_NAME] Found descendant process: PID $desc_pid" >&2
+            fi
           fi
         fi
       done
@@ -787,9 +809,12 @@ run_once() {
 
             # Add new PIDs to our tracking
             if (( ! already_tracked )); then
-              SPAWNED_PIDS+=("$pid")
-              if [[ -n "${LOG_FILE:-}" ]]; then
-                echo "Discovered new process: PID $pid in pgid $pgid" >>"$LOG_FILE" 2>&1 || true
+              # Skip our own PID and parent PID
+              if [[ "$pid" != "$WAIT_ALL_PID" ]] && [[ "$pid" != "$WAIT_ALL_PPID" ]]; then
+                SPAWNED_PIDS+=("$pid")
+                if [[ -n "${LOG_FILE:-}" ]]; then
+                  echo "Discovered new process: PID $pid in pgid $pgid" >>"$LOG_FILE" 2>&1 || true
+                fi
               fi
             fi
 
