@@ -29,12 +29,17 @@ DESCRIPTION:
     Commands wait indefinitely for their turn in the queue.
 
 OPTIONS:
-    --help, -h    Show this help message
+    --help, -h             Show this help message
+    --timeout SECONDS      Command timeout in seconds (default: 86400)
+    --pipeline-timeout SEC Pipeline timeout in seconds (default: 86400)
+    --memory-limit MB      Memory limit per process in MB (default: 2048)
+    --log-dir PATH         Custom log directory (default: PROJECT_ROOT/logs)
+    --verbose              Enable verbose output
 
 ENVIRONMENT VARIABLES:
-    PIPELINE_TIMEOUT      Total pipeline timeout in seconds (default: 7200)
+    PIPELINE_TIMEOUT      Total pipeline timeout in seconds (default: 86400)
     MEMORY_LIMIT_MB       Memory limit per process in MB (default: 2048)
-    TIMEOUT               Individual command timeout in seconds (default: 1800)
+    TIMEOUT               Individual command timeout in seconds (default: 86400)
     VERBOSE               Set to 1 for verbose output
 
 SPECIAL HANDLING:
@@ -92,8 +97,45 @@ EOF
     exit 0
 }
 
-# Check for help flag first
-if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+# Parse command line options
+CUSTOM_LOG_DIR=""
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --help|-h)
+            show_help
+            ;;
+        --timeout)
+            TIMEOUT="$2"
+            shift 2
+            ;;
+        --pipeline-timeout)
+            PIPELINE_TIMEOUT="$2"
+            shift 2
+            ;;
+        --memory-limit)
+            MEMORY_LIMIT_MB="$2"
+            shift 2
+            ;;
+        --log-dir)
+            CUSTOM_LOG_DIR="$2"
+            shift 2
+            ;;
+        --verbose)
+            VERBOSE=1
+            shift
+            ;;
+        --)
+            shift
+            break
+            ;;
+        *)
+            break
+            ;;
+    esac
+done
+
+# Check for help or no arguments
+if [[ $# -eq 0 ]]; then
     show_help
 fi
 
@@ -117,16 +159,20 @@ CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
 PIPELINE_TIMEOUT_FILE="${LOCK_DIR}/pipeline_timeout.txt"
 
 # Pipeline timeout (applies to entire chain)
-PIPELINE_TIMEOUT="${PIPELINE_TIMEOUT:-7200}"  # 2 hours default
+PIPELINE_TIMEOUT="${PIPELINE_TIMEOUT:-86400}"  # 24 hours default
 MEMORY_LIMIT_MB="${MEMORY_LIMIT_MB:-2048}"
-TIMEOUT="${TIMEOUT:-1800}"
+TIMEOUT="${TIMEOUT:-86400}"  # 24 hours default
 VERBOSE="${VERBOSE:-0}"
 
 # Ensure lock directory exists
 mkdir -p "$LOCK_DIR"
 
 # Create logs directory
-LOGS_DIR="${PROJECT_ROOT}/logs"
+if [[ -n "$CUSTOM_LOG_DIR" ]]; then
+    LOGS_DIR="$CUSTOM_LOG_DIR"
+else
+    LOGS_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs}"
+fi
 mkdir -p "$LOGS_DIR"
 EXEC_LOG="${LOGS_DIR}/sequential_queue_$(date '+%Y%m%d_%H%M%S')_$$.log"
 
@@ -345,10 +391,6 @@ cleanup() {
 trap cleanup EXIT INT TERM
 
 # Main execution
-# Parse command line to extract the actual command
-if [[ "$1" == "--" ]]; then
-    shift
-fi
 
 # Get the command and its arguments
 COMMAND="${1:-}"
@@ -403,7 +445,7 @@ while true; do
         if kill -0 "$HOLDER_PID" 2>/dev/null; then
             # Log status periodically
             if [ $((WAIT_COUNT % 60)) -eq 0 ] && [ $WAIT_COUNT -gt 0 ]; then
-                local cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
+                cmd=$(ps -p "$HOLDER_PID" -o args= 2>/dev/null | head -1 || echo "unknown")
                 wait_time=$((WAIT_COUNT))
                 log INFO "Still waiting for PID $HOLDER_PID: $cmd (${wait_time}s elapsed)"
 

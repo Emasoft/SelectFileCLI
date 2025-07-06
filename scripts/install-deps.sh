@@ -1,1 +1,0 @@
-install_sequential.sh

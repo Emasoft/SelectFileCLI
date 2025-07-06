@@ -22,13 +22,13 @@ env:
   MAX_PROCESSES: 50
 
   # Timeouts
-  TIMEOUT_SECONDS: 600
-  TRUFFLEHOG_TIMEOUT: 300
+  TIMEOUT_SECONDS: 86400
+  TRUFFLEHOG_TIMEOUT: 3600
 
 jobs:
   sequential-pipeline:
     runs-on: ubuntu-latest
-    timeout-minutes: 60 # Global timeout
+    timeout-minutes: 1440 # Global timeout (24 hours)
 
     steps:
     - uses: actions/checkout@v4

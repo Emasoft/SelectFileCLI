@@ -252,7 +252,7 @@ while true; do
                 ;;
             k|K)
                 echo -e "\n${RED}Killing all processes...${NC}"
-                pkill -f "sequential-executor.sh" || true
+                pkill -f "sequential_queue.sh" || true
                 pkill -f pytest || true
                 rm -f "$LOCKFILE" "$CURRENT_PID_FILE" "$QUEUE_FILE"
                 ;;

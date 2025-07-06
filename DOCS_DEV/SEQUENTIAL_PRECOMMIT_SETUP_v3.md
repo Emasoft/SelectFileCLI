@@ -137,7 +137,18 @@ All scripts are version 3.0.0 with comprehensive `--help` options.
 ./scripts/sequential_queue.sh -- make test
 ./scripts/sequential_queue.sh -- pytest tests/test_one.py
 ./seq -- ruff format src/main.py  # Convenience symlink
+
+# With custom options
+./scripts/sequential_queue.sh --timeout 3600 --log-dir /tmp/mylogs -- pytest
+./scripts/sequential_queue.sh --pipeline-timeout 7200 --verbose -- make all
 ```
+
+**Command-line Options**:
+- `--timeout SECONDS`: Command timeout (default: 86400)
+- `--pipeline-timeout SEC`: Pipeline timeout (default: 86400)
+- `--memory-limit MB`: Memory limit per process (default: 2048)
+- `--log-dir PATH`: Custom log directory (default: PROJECT_ROOT/logs)
+- `--verbose`: Enable verbose output
 
 #### 3. `memory_monitor.sh` - Memory Guardian
 **Purpose**: Real-time memory monitoring with automatic process termination.
@@ -153,7 +164,14 @@ All scripts are version 3.0.0 with comprehensive `--help` options.
 ```bash
 ./scripts/memory_monitor.sh --help
 ./scripts/memory_monitor.sh --pid $$ --limit 4096 --interval 5
+./scripts/memory_monitor.sh --log-dir /tmp/mylogs --pid 12345
 ```
+
+**Command-line Options**:
+- `--pid PID`: Process ID to monitor (default: parent process)
+- `--limit MB`: Memory limit in megabytes (default: 2048)
+- `--interval SECONDS`: Check interval in seconds (default: 5)
+- `--log-dir PATH`: Custom log directory (default: PROJECT_ROOT/logs)
 
 ### Setup and Utility Scripts
 
@@ -213,6 +231,8 @@ scripts/
 
 ### Pre-commit Configuration (.pre-commit-config.yaml)
 
+**IMPORTANT**: All pre-commit hooks must use `sequential_queue.sh` (not `wait_all.sh`) to ensure proper queuing and prevent concurrent execution.
+
 ```yaml
 default_language_version:
   python: python3.10
@@ -242,7 +262,7 @@ repos:
     hooks:
       - id: format-python-atomic
         name: Format Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 60 -- ruff format "$f" || exit 1; done' --
+        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 3600 -- ruff format "$f" || exit 1; done' --
         language: system
         types: [python]
         require_serial: true
@@ -250,7 +270,7 @@ repos:
 
       - id: lint-python-atomic
         name: Lint Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 60 -- ruff check --fix "$f" || exit 1; done' --
+        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 3600 -- ruff check --fix "$f" || exit 1; done' --
         language: system
         types: [python]
         require_serial: true
@@ -258,21 +278,21 @@ repos:
 
       - id: deptry-check
         name: Check dependencies with deptry
-        entry: ./scripts/wait_all.sh --timeout 300 -- deptry .
+        entry: ./scripts/wait_all.sh --timeout 7200 -- deptry .
         language: system
         pass_filenames: false
         always_run: true
 
       - id: type-check-safe
         name: Type checking (safe)
-        entry: ./scripts/wait_all.sh --timeout 300 -- mypy --strict
+        entry: ./scripts/wait_all.sh --timeout 7200 -- mypy --strict
         language: system
         types: [python]
         pass_filenames: true
 
       - id: secret-detection-safe
         name: Secret detection (safe)
-        entry: ./scripts/wait_all.sh --timeout 60 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        entry: ./scripts/wait_all.sh --timeout 3600 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
         language: system
         pass_filenames: false
 
@@ -284,14 +304,14 @@ repos:
 
       - id: lint-yaml-safe
         name: Lint YAML files
-        entry: ./scripts/wait_all.sh --timeout 30 -- yamllint
+        entry: ./scripts/wait_all.sh --timeout 1800 -- yamllint
         language: system
         types: [yaml]
         pass_filenames: true
 
       - id: lint-actions-safe
         name: Lint GitHub Actions workflows
-        entry: ./scripts/wait_all.sh --timeout 30 -- actionlint
+        entry: ./scripts/wait_all.sh --timeout 1800 -- actionlint
         language: system
         pass_filenames: false
 ```

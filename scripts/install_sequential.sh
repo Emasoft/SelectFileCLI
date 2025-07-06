@@ -257,8 +257,8 @@ MEMORY_LIMIT_MB=2048    # 2GB per process
 CHECK_INTERVAL=5        # Check every 5 seconds
 
 # Timeouts
-TIMEOUT=1800            # 30 minutes per command
-PIPELINE_TIMEOUT=7200   # 2 hours for entire pipeline
+TIMEOUT=86400           # 24 hours per command
+PIPELINE_TIMEOUT=86400  # 24 hours for entire pipeline
 
 # Debugging
 VERBOSE=0               # Set to 1 for verbose output

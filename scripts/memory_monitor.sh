@@ -19,13 +19,10 @@ MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-2048}  # 2GB default
 CHECK_INTERVAL=${CHECK_INTERVAL:-5}       # Check every 5 seconds
 MONITOR_PID_FILE="/tmp/memory_monitor_$$.pid"
 
-# Get project root and create logs directory
+# Get project root
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-LOGS_DIR="${PROJECT_ROOT}/logs"
-mkdir -p "$LOGS_DIR"
 
-# Create timestamped log file
-LOG_FILE="${LOGS_DIR}/memory_monitor_$(date '+%Y%m%d_%H%M%S')_$$.log"
+# LOG_FILE will be set after argument parsing
 
 # Colors
 RED='\033[0;31m'
@@ -38,28 +35,30 @@ log_info() {
     local msg
     msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
     echo -e "${GREEN}${msg}${NC}"
-    echo "${msg}" >> "$LOG_FILE"
+    [[ -n "${LOG_FILE:-}" ]] && echo "${msg}" >> "$LOG_FILE"
 }
 
 log_warn() {
     local msg
     msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
     echo -e "${YELLOW}${msg}${NC}" >&2
-    echo "WARNING: ${msg}" >> "$LOG_FILE"
+    [[ -n "${LOG_FILE:-}" ]] && echo "WARNING: ${msg}" >> "$LOG_FILE"
 }
 
 log_error() {
     local msg
     msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
     echo -e "${RED}${msg}${NC}" >&2
-    echo "ERROR: ${msg}" >> "$LOG_FILE"
+    [[ -n "${LOG_FILE:-}" ]] && echo "ERROR: ${msg}" >> "$LOG_FILE"
 }
 
 # Cleanup on exit
 cleanup() {
     rm -f "$MONITOR_PID_FILE"
-    log_info "Memory monitor stopped"
-    echo "Log saved to: $LOG_FILE" >&2
+    if [[ -n "${LOG_FILE:-}" ]]; then
+        log_info "Memory monitor stopped"
+        echo "Log saved to: $LOG_FILE" >&2
+    fi
 }
 trap cleanup EXIT
 
@@ -129,6 +128,10 @@ kill_process_tree() {
 # Main monitoring loop
 monitor_processes() {
     local parent_pid=${1:-$$}
+
+    # Create log file now that we have LOGS_DIR
+    LOG_FILE="${LOGS_DIR}/memory_monitor_$(date '+%Y%m%d_%H%M%S')_$$.log"
+
     log_info "Starting memory monitor for PID $parent_pid (limit: ${MEMORY_LIMIT_MB}MB)"
     log_info "Project: $PROJECT_ROOT"
     log_info "Log file: $LOG_FILE"
@@ -207,6 +210,7 @@ OPTIONS:
     --pid PID           Process ID to monitor (default: parent process)
     --limit MB          Memory limit in megabytes (default: 2048)
     --interval SECONDS  Check interval in seconds (default: 5)
+    --log-dir PATH      Custom log directory (default: PROJECT_ROOT/logs)
     --help              Show this help message
 
 EXAMPLES:
@@ -221,6 +225,9 @@ EXAMPLES:
 
     # Monitor a long-running process
     $0 --pid \$\$ --limit 8192 --interval 10
+
+    # Use custom log directory
+    $0 --log-dir /tmp/mylogs --pid 12345
 
 FEATURES:
     - Monitors process and all its descendants
@@ -242,6 +249,7 @@ EOF
 
 # Parse arguments
 PARENT_PID=""
+CUSTOM_LOG_DIR=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --pid)
@@ -256,17 +264,29 @@ while [[ $# -gt 0 ]]; do
             CHECK_INTERVAL="$2"
             shift 2
             ;;
+        --log-dir)
+            CUSTOM_LOG_DIR="$2"
+            shift 2
+            ;;
         --help|-h)
             show_help
             ;;
         *)
             echo "Unknown option: $1"
-            echo "Usage: $0 [--pid PID] [--limit MB] [--interval SECONDS]"
+            echo "Usage: $0 [--pid PID] [--limit MB] [--interval SECONDS] [--log-dir PATH]"
             echo "Run '$0 --help' for detailed information"
             exit 1
             ;;
     esac
 done
+
+# Create logs directory
+if [[ -n "$CUSTOM_LOG_DIR" ]]; then
+    LOGS_DIR="$CUSTOM_LOG_DIR"
+else
+    LOGS_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs}"
+fi
+mkdir -p "$LOGS_DIR"
 
 # Start monitoring
 if [[ -n "$PARENT_PID" ]]; then

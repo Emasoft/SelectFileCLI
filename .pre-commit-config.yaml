@@ -44,7 +44,7 @@ repos:
     hooks:
       - id: ruff-format-atomic
         name: Format Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 60 -- ruff format --line-length=320 "$f" || exit 1; done' --
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff format --line-length=320 "$f" || exit 1; done' --
         language: system
         types: [python]
         pass_filenames: true
@@ -53,7 +53,7 @@ repos:
 
       - id: ruff-check-atomic
         name: Lint Python (atomic)
-        entry: bash -c 'for f in "$@"; do ./scripts/wait_all.sh --timeout 60 -- ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --fix "$f" || exit 1; done' --
+        entry: bash -c 'for f in "$@"; do ./scripts/sequential_queue.sh --timeout 3600 -- ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --fix "$f" || exit 1; done' --
         language: system
         types: [python]
         pass_filenames: true
@@ -62,7 +62,7 @@ repos:
 
       - id: deptry
         name: Check dependencies with deptry
-        entry: uv run deptry src
+        entry: ./scripts/sequential_queue.sh --timeout 7200 -- uv run deptry src
         language: system
         types: [python]
         pass_filenames: false
@@ -74,7 +74,7 @@ repos:
     hooks:
       - id: mypy-safe
         name: Type checking (safe)
-        entry: ./scripts/wait_all.sh --timeout 300 -- uv run mypy --ignore-missing-imports --strict
+        entry: ./scripts/sequential_queue.sh --timeout 7200 -- uv run mypy --ignore-missing-imports --strict
         language: system
         types: [python]
         require_serial: true
@@ -83,7 +83,7 @@ repos:
 
       - id: trufflehog-safe
         name: Secret detection (safe)
-        entry: ./scripts/wait_all.sh --timeout 60 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        entry: ./scripts/sequential_queue.sh --timeout 3600 -- trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
         language: system
         pass_filenames: false
         require_serial: true
@@ -94,7 +94,7 @@ repos:
     hooks:
       - id: yamlfmt
         name: Format YAML files
-        entry: yamlfmt
+        entry: ./scripts/sequential_queue.sh --timeout 1800 -- yamlfmt
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
         pass_filenames: true
@@ -103,7 +103,7 @@ repos:
 
       - id: yamllint
         name: Lint YAML files
-        entry: uv run yamllint
+        entry: ./scripts/sequential_queue.sh --timeout 1800 -- uv run yamllint
         language: system
         files: '^\.github/.*\.(yml|yaml)$'
         pass_filenames: true
@@ -112,7 +112,7 @@ repos:
 
       - id: actionlint
         name: Lint GitHub Actions workflows
-        entry: actionlint
+        entry: ./scripts/sequential_queue.sh --timeout 1800 -- actionlint
         language: system
         files: '^\.github/workflows/.*\.(yml|yaml)$'
         pass_filenames: true
