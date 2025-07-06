@@ -1,14 +1,16 @@
 #!/usr/bin/env bash
 # memory_monitor.sh - Monitor and kill processes exceeding memory limits
+# Version: 3.0.0
 #
 # This script monitors all child processes of the sequential executor
 # and kills any that exceed the memory limit to prevent system lockup
 #
 set -euo pipefail
 
-# Portable tac replacement function (tac not available on macOS)
-# Reverses the order of lines
-portable_tac() {
+VERSION='3.0.0'
+
+# Reverses the order of lines (cross-platform alternative to tac)
+reverse_lines() {
     awk '{a[i++]=$0} END {for (j=i-1; j>=0;) print a[j--]}'
 }
 
@@ -105,7 +107,7 @@ kill_process_tree() {
     all_pids="$pid $(get_descendants "$pid")"
 
     # Kill in reverse order (children first)
-    for p in $(echo "$all_pids" | tr ' ' '\n' | portable_tac); do
+    for p in $(echo "$all_pids" | tr ' ' '\n' | reverse_lines); do
         if kill -0 "$p" 2>/dev/null; then
             log_warn "  Killing PID $p ($(ps -p "$p" -o comm= 2>/dev/null || echo 'unknown'))"
             kill -TERM "$p" 2>/dev/null || true
@@ -116,7 +118,7 @@ kill_process_tree() {
     sleep 2
 
     # Force kill any remaining
-    for p in $(echo "$all_pids" | tr ' ' '\n' | portable_tac); do
+    for p in $(echo "$all_pids" | tr ' ' '\n' | reverse_lines); do
         if kill -0 "$p" 2>/dev/null; then
             log_error "  Force killing PID $p"
             kill -KILL "$p" 2>/dev/null || true
@@ -189,6 +191,55 @@ monitor_processes() {
     log_info "Parent process $parent_pid terminated, monitor exiting"
 }
 
+# Display help message
+show_help() {
+    cat << EOF
+memory_monitor.sh v${VERSION} - Process memory monitoring and enforcement
+
+USAGE:
+    $0 [OPTIONS]
+
+DESCRIPTION:
+    Monitors process memory usage and kills processes that exceed specified limits.
+    Designed to work with sequential-executor.sh to prevent memory explosions.
+
+OPTIONS:
+    --pid PID           Process ID to monitor (default: parent process)
+    --limit MB          Memory limit in megabytes (default: 2048)
+    --interval SECONDS  Check interval in seconds (default: 5)
+    --help              Show this help message
+
+EXAMPLES:
+    # Monitor current shell with 2GB limit
+    $0
+
+    # Monitor specific process with 4GB limit
+    $0 --pid 12345 --limit 4096
+
+    # Fast monitoring (check every second)
+    $0 --interval 1
+
+    # Monitor a long-running process
+    $0 --pid \$\$ --limit 8192 --interval 10
+
+FEATURES:
+    - Monitors process and all its descendants
+    - Kills process trees that exceed memory limit
+    - Logs all actions with timestamps
+    - Cross-platform (Linux/macOS/BSD)
+    - Graceful termination (SIGTERM then SIGKILL)
+
+LOG FILES:
+    Logs are saved to: PROJECT_ROOT/logs/memory_monitor_*.log
+
+ENVIRONMENT VARIABLES:
+    MEMORY_LIMIT_MB    Default memory limit (overridden by --limit)
+    CHECK_INTERVAL     Default check interval (overridden by --interval)
+
+EOF
+    exit 0
+}
+
 # Parse arguments
 PARENT_PID=""
 while [[ $# -gt 0 ]]; do
@@ -205,9 +256,13 @@ while [[ $# -gt 0 ]]; do
             CHECK_INTERVAL="$2"
             shift 2
             ;;
+        --help|-h)
+            show_help
+            ;;
         *)
             echo "Unknown option: $1"
             echo "Usage: $0 [--pid PID] [--limit MB] [--interval SECONDS]"
+            echo "Run '$0 --help' for detailed information"
             exit 1
             ;;
     esac

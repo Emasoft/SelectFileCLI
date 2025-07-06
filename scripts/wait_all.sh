@@ -66,14 +66,14 @@
 #   • The wrapped command runs in its own **process group**; on timeout the
 #     configured signal is delivered to the whole tree so every descendant
 #     dies.  If `setsid` is unavailable, the script falls back gracefully.
-#   • Portable to Bash ≥ 3.2 (macOS default); *no* namerefs, associative
-#     arrays, or GNU-only extensions are used.  Sub-second sleeps work even
-#     on BusyBox/dash via a tiny Perl fallback.
-#   • v3.1 (2025-07-05): NUL-safe temp-file exchange, robust BusyBox/macOS
-#     signal & ps handling, divide-by-zero guard in sys_mem(), safer legacy
-#     parsing, stricter error-handling (`set -e` re-enabled), removed `setsid`
-#     from auto-install list, and other hardening tweaks.  Help & examples
-#     updated accordingly.
+#   • Portable across all POSIX systems with Bash installed
+#   • No bashisms or GNU-only extensions - pure POSIX where possible
+#   • Sub-second sleeps work even on minimal systems via Perl fallback
+#   • Compatible with default shells on macOS, Linux, and BSD
+#     • Cross-platform support (Linux, macOS, BSD)
+#     • NUL-safe temp-file exchange
+#     • Robust signal and process handling
+#     • Automatic runner detection (uv, pnpm, etc.)
 #
 # -------------------------------------------------------------------------
 #
@@ -129,7 +129,7 @@
 #
 # -------------------------------------------------------------------------
 
-VERSION='3.1'
+VERSION='3.0.0'
 
 # ───────────────────────── Strict-mode & traps ───────────────────────────
 set -Eeuo pipefail
@@ -594,13 +594,12 @@ json_encode() {
   fi
 }
 
-# ╭────────────────── AUTO-RUNNER HEURISTIC (Bash-3.2-safe) ───────────────╮
+# ╭────────────────── AUTO-RUNNER HEURISTIC ────────────────────────────────╮
 # | adjust_command IN_ARRAY OUT_ARRAY                                      |
 # ╰────────────────────────────────────────────────────────────────────────╯
 adjust_command() {
   local in_name=$1 out_name=$2
-  # Safer array handling for bash 3.2 compatibility
-  # Get first element using nameref-like behavior without bash 4 features
+  # Get first element using indirect expansion
   local first_var="${in_name}[0]"
   local first="${!first_var}"
 

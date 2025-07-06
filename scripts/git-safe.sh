@@ -1,10 +1,71 @@
 #!/usr/bin/env bash
 # git-safe.sh - Safe git wrapper that prevents concurrent git operations
-# This wrapper ensures only ONE git operation runs at a time
+# Version: 3.0.0
 #
+# This wrapper ensures only ONE git operation runs at a time
 # Enhanced to handle pre-commit hooks and prevent deadlocks
 
 set -euo pipefail
+
+VERSION='3.0.0'
+
+# Display help message
+show_help() {
+    cat << 'EOF'
+git-safe.sh v3.0.0 - Safe sequential git wrapper
+
+USAGE:
+    git-safe.sh [GIT_COMMAND] [GIT_ARGS...]
+    git-safe.sh --help
+
+DESCRIPTION:
+    Ensures only ONE git operation runs at a time to prevent conflicts.
+    Automatically detects and handles pre-commit hooks to avoid deadlocks.
+
+EXAMPLES:
+    # Safe commit
+    git-safe.sh commit -m "Update feature"
+
+    # Safe merge
+    git-safe.sh merge feature-branch
+
+    # Safe rebase
+    git-safe.sh rebase -i main
+
+    # Any git command
+    git-safe.sh push origin main
+    git-safe.sh pull --rebase
+    git-safe.sh cherry-pick abc123
+
+FEATURES:
+    - Prevents concurrent git operations
+    - Handles pre-commit hook deadlocks
+    - Detects stale locks and cleans them up
+    - Checks for existing git lock files
+    - Works with sequential-executor.sh
+
+LOCK MECHANISM:
+    - Lock directory: /tmp/git-safe-PROJECT_HASH/
+    - Tracks current operation with PID
+    - Maximum wait time: 30 seconds
+    - Automatic stale lock cleanup
+
+SPECIAL HANDLING:
+    - Commits set GIT_COMMIT_IN_PROGRESS flag
+    - Pre-commit hooks see SEQUENTIAL_EXECUTOR_PID
+    - Direct execution if already in git hook
+
+INTEGRATION:
+    Uses wait_all.sh for atomic execution when available.
+
+EOF
+    exit 0
+}
+
+# Check for help flag
+if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+    show_help
+fi
 
 # Skip if already in a git hook to prevent deadlocks
 if [ -n "${GIT_DIR:-}" ] || [ -n "${GIT_WORK_TREE:-}" ]; then

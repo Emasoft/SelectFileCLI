@@ -1,10 +1,78 @@
 #!/usr/bin/env bash
 # install-deps.sh - Automatic dependency installer for scripts
+# Version: 3.0.0
 #
 # This script provides functions to automatically install missing
 # dependencies on Linux, macOS, and BSD systems
 #
 set -euo pipefail
+
+VERSION='3.0.0'
+
+# Display help message
+show_help() {
+    cat << 'EOF'
+install-deps.sh v3.0.0 - Cross-platform dependency installer
+
+USAGE:
+    install-deps.sh [COMMAND] [DEPS...]
+    install-deps.sh --help
+
+COMMANDS:
+    check DEPS...     Check if dependencies are installed
+    install DEPS...   Install missing dependencies
+    ensure-coreutils  Ensure GNU coreutils are available
+    detect-os         Show detected operating system
+
+    If no command is given, 'install' is assumed.
+
+EXAMPLES:
+    # Install multiple dependencies
+    install-deps.sh jq ripgrep fd
+
+    # Check if tools are installed
+    install-deps.sh check git make gcc
+
+    # Ensure GNU coreutils on macOS/BSD
+    install-deps.sh ensure-coreutils
+
+    # Detect operating system
+    install-deps.sh detect-os
+
+SUPPORTED SYSTEMS:
+    - macOS (via Homebrew)
+    - Debian/Ubuntu (via apt)
+    - Red Hat/CentOS (via yum)
+    - Alpine Linux (via apk)
+    - Arch Linux (via pacman)
+    - FreeBSD/OpenBSD (via pkg)
+
+PACKAGE MAPPINGS:
+    Some commands map to different package names:
+    - tac → coreutils (on macOS/BSD)
+    - rg → ripgrep
+    - fd → fd-find (on Debian)
+
+FUNCTIONS EXPORTED:
+    When sourced, exports these functions:
+    - detect_os()
+    - command_exists()
+    - install_package()
+    - get_package_name()
+    - install_missing_deps()
+    - ensure_coreutils()
+
+EOF
+    exit 0
+}
+
+# Check if script is being sourced or executed
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Script is being executed directly
+    if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+        show_help
+    fi
+fi
 
 # Detect OS type
 detect_os() {
@@ -178,3 +246,41 @@ export -f install_package
 export -f get_package_name
 export -f install_missing_deps
 export -f ensure_coreutils
+
+# Main execution when run as script
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Parse command line
+    case "${1:-install}" in
+        check)
+            shift
+            missing=()
+            for dep in "$@"; do
+                if ! command_exists "$dep"; then
+                    missing+=("$dep")
+                fi
+            done
+            if [ ${#missing[@]} -eq 0 ]; then
+                echo "All dependencies are installed"
+                exit 0
+            else
+                echo "Missing: ${missing[*]}"
+                exit 1
+            fi
+            ;;
+        install)
+            shift
+            install_missing_deps "$@"
+            ;;
+        ensure-coreutils)
+            ensure_coreutils
+            ;;
+        detect-os)
+            echo "Detected OS: $(detect_os)"
+            ;;
+        *)
+            echo "Unknown command: $1"
+            echo "Run '$0 --help' for usage"
+            exit 1
+            ;;
+    esac
+fi

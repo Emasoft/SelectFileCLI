@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# sequential-executor-strict.sh - TRUE sequential execution
+# sequential-executor.sh - TRUE sequential execution
+# Version: 3.0.0
 #
 # Principles:
 # 1. Processes wait INDEFINITELY for their turn - no timeouts on lock acquisition
@@ -24,10 +25,76 @@
 #
 set -euo pipefail
 
-# Check bash version (require 3.2+)
-# Note: Bash 3.2 is the default on macOS
+VERSION='3.0.0'
+
+# Display help message
+show_help() {
+    cat << 'EOF'
+sequential-executor.sh v3.0.0 - Strict sequential command execution
+
+USAGE:
+    sequential-executor.sh [OPTIONS] -- COMMAND [ARGS...]
+
+DESCRIPTION:
+    Ensures only ONE command runs at a time across the entire project.
+    Commands wait indefinitely for their turn - no timeouts on lock acquisition.
+    Designed for atomic operations to prevent process explosions.
+
+OPTIONS:
+    --help, -h    Show this help message
+
+ENVIRONMENT VARIABLES:
+    PIPELINE_TIMEOUT      Total pipeline timeout in seconds (default: 7200)
+    MEMORY_LIMIT_MB       Memory limit per process in MB (default: 2048)
+    TIMEOUT               Individual command timeout in seconds (default: 1800)
+
+PRINCIPLES:
+    1. Processes wait INDEFINITELY for their turn
+    2. Only ONE process runs at a time - no exceptions
+    3. Pipeline timeout applies to entire execution chain
+    4. Commands should be ATOMIC (smallest units of work)
+
+EXAMPLES:
+    # Format a single file (GOOD - atomic)
+    sequential-executor.sh ruff format src/main.py
+
+    # Test a single module (GOOD - atomic)
+    sequential-executor.sh pytest tests/test_auth.py
+
+    # Type check one file (GOOD - atomic)
+    sequential-executor.sh mypy --strict src/utils.py
+
+    # Format entire codebase (BAD - not atomic)
+    sequential-executor.sh ruff format .
+
+    # Run all tests (BAD - not atomic)
+    sequential-executor.sh pytest
+
+INTEGRATION:
+    Works with wait_all.sh for process monitoring and memory limits.
+    Integrates with pre-commit hooks for sequential execution.
+
+LOG FILES:
+    Execution logs: PROJECT_ROOT/logs/sequential_executor_*.log
+    Memory logs: PROJECT_ROOT/logs/memory_monitor_*.log
+
+LOCK FILES:
+    Lock directory: /tmp/seq-exec-PROJECT_HASH/
+    Queue file: /tmp/seq-exec-PROJECT_HASH/queue.txt
+
+EOF
+    exit 0
+}
+
+# Check for help flag first
+if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+    show_help
+fi
+
+# Verify minimum bash version
 if [ "${BASH_VERSION%%.*}" -lt 3 ] || { [ "${BASH_VERSION%%.*}" -eq 3 ] && [ "${BASH_VERSION#*.}" -lt 2 ]; }; then
     echo "ERROR: This script requires bash 3.2 or higher" >&2
+    echo "Current version: $BASH_VERSION" >&2
     exit 1
 fi
 

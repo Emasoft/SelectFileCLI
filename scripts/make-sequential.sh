@@ -1,11 +1,72 @@
 #!/usr/bin/env bash
 # make-sequential.sh - Wrapper for make commands to ensure sequential execution
+# Version: 3.0.0
 #
 # This script ensures that only one make command runs at a time
 # preventing the issue where multiple make commands spawn multiple
 # sequential executors
 #
 set -euo pipefail
+
+VERSION='3.0.0'
+
+# Display help message
+show_help() {
+    cat << 'EOF'
+make-sequential.sh v3.0.0 - Sequential make command wrapper
+
+USAGE:
+    make-sequential.sh [OPTIONS] [MAKE_ARGS...]
+
+DESCRIPTION:
+    Ensures only one make command runs at a time across the project.
+    Prevents multiple make commands from spawning parallel executors.
+
+OPTIONS:
+    --help, -h    Show this help message
+
+    All other arguments are passed directly to make.
+
+EXAMPLES:
+    # Run make test sequentially
+    make-sequential.sh test
+
+    # Run make with multiple targets
+    make-sequential.sh clean build test
+
+    # Pass make options
+    make-sequential.sh -j1 all
+
+    # Run specific makefile
+    make-sequential.sh -f custom.mk target
+
+FEATURES:
+    - Global lock per project
+    - Queue management for waiting processes
+    - Stale lock detection and cleanup
+    - Integration with wait_all.sh for atomic execution
+
+LOCK FILES:
+    Lock directory: /tmp/make-lock-PROJECT_HASH
+    Queue file: /tmp/make-queue-PROJECT_HASH
+
+TIMEOUT:
+    Maximum wait time: 300 seconds (5 minutes)
+
+LOG OUTPUT:
+    All operations are logged with timestamps and color coding:
+    - GREEN: Info messages
+    - YELLOW: Warnings
+    - RED: Errors
+
+EOF
+    exit 0
+}
+
+# Check for help flag
+if [[ $# -eq 0 ]] || [[ "$1" == "--help" ]] || [[ "$1" == "-h" ]]; then
+    show_help
+fi
 
 # Store script arguments for use in functions
 SCRIPT_ARGS="$*"
