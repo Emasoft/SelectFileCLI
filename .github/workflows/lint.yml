@@ -25,19 +25,19 @@ jobs:
         sudo mv actionlint /usr/local/bin/
     - name: Lint with ruff
       run: |
-        uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
+        ./scripts/sequential_queue.sh --timeout 3600 -- uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
     - name: Format check with ruff
       run: |
-        uv run ruff format --check --line-length=320
+        ./scripts/sequential_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320
     - name: Type check with mypy
       run: |
-        uv run mypy --install-types --non-interactive src/selectfilecli || true
+        ./scripts/sequential_queue.sh --timeout 7200 -- uv run mypy --install-types --non-interactive src/selectfilecli || true
     - name: Check dependencies with deptry
       run: |
-        uv run deptry src
+        ./scripts/sequential_queue.sh --timeout 3600 -- uv run deptry src
     - name: Lint YAML files
       run: |
-        uv run yamllint .github/workflows/*.yml
+        ./scripts/sequential_queue.sh --timeout 1800 -- uv run yamllint .github/workflows/*.yml
     - name: Lint GitHub Actions
       run: |-
-        actionlint
+        ./scripts/sequential_queue.sh --timeout 1800 -- actionlint

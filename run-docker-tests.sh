@@ -61,39 +61,39 @@ main() {
     case "$PROFILE" in
         test)
             print_status "$YELLOW" "Running tests in Docker..."
-            docker-compose --profile test up --build --abort-on-container-exit
+            ./scripts/sequential_queue.sh --timeout 7200 -- docker-compose --profile test up --build --abort-on-container-exit
             ;;
 
         lint)
             print_status "$YELLOW" "Running linters in Docker..."
-            docker-compose --profile lint up --build --abort-on-container-exit
+            ./scripts/sequential_queue.sh --timeout 7200 -- docker-compose --profile lint up --build --abort-on-container-exit
             ;;
 
         build)
             print_status "$YELLOW" "Building package in Docker..."
-            docker-compose --profile build up --build --abort-on-container-exit
+            ./scripts/sequential_queue.sh --timeout 3600 -- docker-compose --profile build up --build --abort-on-container-exit
             ;;
 
         prod)
             print_status "$YELLOW" "Testing production image..."
-            docker-compose --profile prod up --build --abort-on-container-exit
+            ./scripts/sequential_queue.sh --timeout 3600 -- docker-compose --profile prod up --build --abort-on-container-exit
             ;;
 
         dev)
             print_status "$YELLOW" "Starting development shell..."
-            docker-compose --profile dev run --rm dev
+            ./scripts/sequential_queue.sh --timeout 86400 -- docker-compose --profile dev run --rm dev
             ;;
 
         ci)
             print_status "$YELLOW" "Running CI tests..."
-            docker-compose -f docker-compose.ci.yml up --build test-ci lint-ci build-ci --abort-on-container-exit
+            ./scripts/sequential_queue.sh --timeout 7200 -- docker-compose -f docker-compose.ci.yml up --build test-ci lint-ci build-ci --abort-on-container-exit
             ;;
 
         all)
             print_status "$YELLOW" "Running all tests..."
             for p in test lint build prod; do
                 print_status "$BLUE" "Running profile: $p"
-                docker-compose --profile "$p" up --build --abort-on-container-exit
+                ./scripts/sequential_queue.sh --timeout 7200 -- docker-compose --profile "$p" up --build --abort-on-container-exit
             done
             ;;
 

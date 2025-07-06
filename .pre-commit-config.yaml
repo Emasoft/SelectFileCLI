@@ -39,7 +39,7 @@ repos:
         pass_filenames: true
       - id: check-added-large-files
         name: Check for large files
-        entry: bash -c 'for f in "$@"; do size=$(wc -c < "$f"); [ $size -lt 1024000 ] || { echo "$f is too large: $size bytes"; exit 1; }; done' --
+        entry: bash -c 'for f in "$@"; do size=$(wc -c < "$f"); [ $size -lt 1024000 ] || { echo "$f is too large"; exit 1; }; done' --
         language: system
         stages: [pre-commit]
         require_serial: true
