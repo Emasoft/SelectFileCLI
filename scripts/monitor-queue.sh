@@ -1,7 +1,72 @@
 #!/usr/bin/env bash
 # monitor-queue.sh - Monitor the sequential execution queue and system state
-
+# Version: 3.0.0
+#
 set -euo pipefail
+
+VERSION='3.0.0'
+
+# Display help message
+show_help() {
+    cat << 'EOF'
+monitor-queue.sh v3.0.0 - Real-time sequential execution queue monitor
+
+USAGE:
+    monitor-queue.sh [OPTIONS]
+
+DESCRIPTION:
+    Displays real-time status of the sequential execution queue,
+    including current process, queued commands, and orphaned processes.
+    Updates every 2 seconds. Press Ctrl+C to exit.
+
+OPTIONS:
+    --help, -h    Show this help message
+
+DISPLAY SECTIONS:
+    1. Current Execution
+       - PID, command, elapsed time, memory usage
+       - Shows "None" if no process is running
+
+    2. Queue Status
+       - Lists all processes waiting for execution
+       - Shows position, PID, and command for each
+       - Empty queue shows "Empty"
+
+    3. Orphaned Processes
+       - Detects processes with parent PID = 1
+       - Helps identify stuck or abandoned processes
+
+    4. Lock Files
+       - Shows all lock directories in /tmp
+       - Helps diagnose lock-related issues
+
+COLOR CODING:
+    - Green: Normal operation
+    - Yellow: Active processes
+    - Red: Warnings or issues
+    - Cyan: Headers and status
+
+EXAMPLES:
+    # Monitor queue in real-time
+    ./monitor-queue.sh
+
+    # Watch queue in separate terminal
+    watch -n 1 ./monitor-queue.sh
+
+TROUBLESHOOTING:
+    If queue appears stuck:
+    1. Check for orphaned processes
+    2. Run ./kill-orphans.sh --dry-run to see what can be cleaned
+    3. Check lock files for stale locks
+
+EOF
+    exit 0
+}
+
+# Check for help flag
+if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
+    show_help
+fi
 
 # Get project info
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"

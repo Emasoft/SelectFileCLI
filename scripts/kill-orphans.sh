@@ -1,22 +1,84 @@
 #!/usr/bin/env bash
 # kill-orphans.sh - Clean up orphaned processes and stale locks
-# 
+# Version: 3.0.0
+#
 # This script finds and terminates processes that have been orphaned (parent PID = 1)
 # and removes stale lock files from the sequential execution system.
 #
-# Usage: ./kill-orphans.sh [--dry-run]
+# Usage: ./kill-orphans.sh [--dry-run | --help]
 #
 # Options:
 #   --dry-run    Show what would be killed without actually killing
-
+#   --help       Show this help message
+#
 set -euo pipefail
+
+VERSION='3.0.0'
+
+# Display help message
+show_help() {
+    cat << 'EOF'
+kill-orphans.sh v3.0.0 - Emergency cleanup for orphaned processes
+
+USAGE:
+    kill-orphans.sh [OPTIONS]
+
+DESCRIPTION:
+    Finds and terminates processes that have been orphaned (parent PID = 1)
+    and removes stale lock files from the sequential execution system.
+
+OPTIONS:
+    --dry-run    Show what would be killed without actually killing
+    --help, -h   Show this help message
+
+PROCESSES CHECKED:
+    - pytest, python test runners
+    - uv run commands
+    - pre-commit hooks
+    - ruff, mypy linters
+    - sequential-executor, wait_all, memory_monitor
+
+LOCK CLEANUP:
+    Removes stale locks from:
+    - /tmp/seq-exec-*
+    - /tmp/make-lock-*
+    - /tmp/git-safe-*
+
+EXAMPLES:
+    # Show what would be cleaned up
+    ./kill-orphans.sh --dry-run
+
+    # Actually clean up orphans
+    ./kill-orphans.sh
+
+SAFETY:
+    - Only kills processes with parent PID = 1 (true orphans)
+    - Preserves your current shell and its ancestors
+    - Shows detailed information before taking action
+
+EOF
+    exit 0
+}
 
 # Parse arguments
 DRY_RUN=0
-if [[ "${1:-}" == "--dry-run" ]]; then
-    DRY_RUN=1
-    echo "DRY RUN MODE - No processes will be killed"
-fi
+case "${1:-}" in
+    --help|-h)
+        show_help
+        ;;
+    --dry-run)
+        DRY_RUN=1
+        echo "DRY RUN MODE - No processes will be killed"
+        ;;
+    "")
+        # No arguments, proceed normally
+        ;;
+    *)
+        echo "Unknown option: $1"
+        echo "Use --help for usage information"
+        exit 1
+        ;;
+esac
 
 echo "Scanning for orphaned processes..."
 
@@ -40,32 +102,32 @@ FOUND=0
 for pattern in "${PATTERNS[@]}"; do
     # Find processes matching the pattern
     pids=$(pgrep -f "$pattern" 2>/dev/null || true)
-    
+
     for pid in $pids; do
         # Skip if process doesn't exist
         if ! kill -0 "$pid" 2>/dev/null; then
             continue
         fi
-        
+
         # Get parent PID (handling different ps output formats)
         ppid=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ' || echo "")
-        
+
         # Check if orphaned (parent PID = 1) or parent is dead
         if [[ "$ppid" == "1" ]] || [[ -z "$ppid" ]] || ! kill -0 "$ppid" 2>/dev/null; then
             # Get process command for logging
             cmd=$(ps -p "$pid" -o comm= 2>/dev/null || echo "unknown")
             echo "Found orphan: PID=$pid PPID=$ppid CMD=$cmd PATTERN=$pattern"
             ((FOUND++))
-            
+
             if [[ $DRY_RUN -eq 0 ]]; then
                 # Try graceful termination first
                 if kill -TERM "$pid" 2>/dev/null; then
                     echo "  → Sent SIGTERM to PID $pid"
                     ((KILLED++))
-                    
+
                     # Give it a moment to exit cleanly
                     sleep 0.5
-                    
+
                     # Force kill if still alive
                     if kill -0 "$pid" 2>/dev/null; then
                         kill -KILL "$pid" 2>/dev/null || true
@@ -93,14 +155,14 @@ for lock_dir in /tmp/seq-exec-* /tmp/make-lock-*; do
         # Check if lock has a PID file
         if [[ -f "$lock_dir/current.pid" ]]; then
             lock_pid=$(cat "$lock_dir/current.pid" 2>/dev/null || echo "0")
-            
+
             # Check if process is still alive
             if [[ "$lock_pid" -gt 0 ]] && kill -0 "$lock_pid" 2>/dev/null; then
                 echo "Lock $lock_dir is active (PID $lock_pid)"
                 continue
             fi
         fi
-        
+
         # Lock is stale
         echo "Stale lock found: $lock_dir"
         if [[ $DRY_RUN -eq 0 ]]; then
