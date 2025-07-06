@@ -1,0 +1,7 @@
+RUN_ID=20250706_172639
+START_TIME=2025-07-06 17:26:39
+PID=95240
+STATUS=running
+PROJECT=/Users/emanuelesabetta/Code/selectFileCLI
+BRANCH=main
+WORKFLOW=sequential_queue

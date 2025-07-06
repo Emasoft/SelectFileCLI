@@ -521,7 +521,12 @@ sys_mem() {
 # ───────────────────────── Default option values ─────────────────────────
 mkdir -p ./logs
 TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
-LOG_FILE="./logs/wait_all_${TIMESTAMP}.log"
+# Use JOB_ID if provided (from sequential queue), otherwise use timestamp
+if [[ -n "${JOB_ID:-}" ]]; then
+  LOG_FILE="./logs/wait_all_${JOB_ID}.log"
+else
+  LOG_FILE="./logs/wait_all_${TIMESTAMP}.log"
+fi
 
 VERBOSE=0 JSON=0 TIMEOUT=0 KILL_SIGNAL="SIGTERM" RETRY_MAX=0 INSTALL_DEPS=0
 CMD=()  LEGACY_CMD_STRING=""
@@ -1003,3 +1008,6 @@ else
   [[ -n $final_err ]] && printf '%s' "$final_err" >&2
 fi
 exit "$final_rc"
+
+
+
