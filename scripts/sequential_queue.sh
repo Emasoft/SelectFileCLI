@@ -4,7 +4,7 @@
 #
 # This script consolidates:
 # - sequential-executor.sh (general queue management)
-# - git-safe.sh (git-specific safety checks)
+# - git-specific safety checks (integrated)
 # - make-sequential.sh (make-specific handling)
 #
 # Auto-detects git and make commands for special handling while

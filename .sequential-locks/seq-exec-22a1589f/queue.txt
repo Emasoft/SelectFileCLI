@@ -1,0 +1,3 @@
+26478:1751809487:echo /tmp/test_atomification/test2.py
+26924:1751809500:ruff check /tmp/test_atomify/test2.py
+28648:1751809572:mypy /tmp/test_atomify/test1.py

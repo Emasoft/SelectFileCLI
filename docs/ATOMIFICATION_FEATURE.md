@@ -201,10 +201,41 @@ Enable verbose mode for sequential queue:
 
 ## Current Status
 
-- ✅ Tool configuration complete
-- ✅ Path expansion working
-- ✅ Atomic command generation working
-- ✅ Sequential queue v4 created
-- ⚠️  execute_single_command needs debugging
-- ⏳ Integration testing pending
+- ✅ Tool configuration complete (tool_atomifier.sh)
+- ✅ Path expansion working (handles directories, globs, ~, env vars)
+- ✅ Atomic command generation working (40+ tools supported)
+- ✅ Sequential queue v5 created with correct recursive architecture
+- ✅ Each atomic command goes through full sequential processing
+- ✅ Integration testing successful
 - ⏳ Workflow updates pending
+
+## Version History
+
+- **v4**: Initial attempt with incorrect internal execution
+- **v5**: Correct implementation with recursive calls to sequential_queue.sh
+
+## Test Results
+
+### Successful Tests Performed
+
+1. **Basic Python atomification**:
+   ```bash
+   ./scripts/sequential_queue_v5.sh -- ruff check /tmp/test_atomify/
+   # Successfully atomified into 2 commands, each processed individually
+   ```
+
+2. **Tool-specific file filtering**:
+   - Python tools only process .py files
+   - YAML tools only process .yml/.yaml files
+   - JavaScript tools only process .js/.ts files
+
+3. **Full sequential processing preserved**:
+   - Each atomic command acquires lock
+   - Memory monitoring active
+   - Pipeline timeout enforced
+   - Git/Make special handling preserved
+
+4. **Edge cases handled**:
+   - Single file: Still uses atomic execution
+   - No files found: Runs original command
+   - Mixed file types: Filters by tool requirements

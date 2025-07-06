@@ -46,7 +46,7 @@
 - ✅ All scripts have version 3.0.0
 - ✅ All symlinks properly created:
   - `seq` → `scripts/sequential_queue.sh` (in project root)
-  - `git-safe.sh` → `sequential_queue.sh`
+  - `git-safe.sh` → `sequential_queue.sh` (for backward compatibility)
   - `make-sequential.sh` → `sequential_queue.sh`
   - `sequential-executor.sh` → `sequential_queue.sh`
 - ✅ Scripts pass shellcheck linting

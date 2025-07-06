@@ -361,10 +361,10 @@ create_symlinks() {
         log_success "Created sequential-executor.sh symlink"
     fi
 
-    # git-safe.sh → sequential_queue.sh
+    # git-safe.sh → sequential_queue.sh (for backward compatibility)
     if [ ! -L "git-safe.sh" ]; then
         ln -sf sequential_queue.sh git-safe.sh
-        log_success "Created git-safe.sh symlink"
+        log_success "Created git-safe.sh symlink (for backward compatibility)"
     fi
 
     # make-sequential.sh → sequential_queue.sh

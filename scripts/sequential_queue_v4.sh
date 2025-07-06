@@ -4,7 +4,7 @@
 #
 # This script consolidates:
 # - sequential-executor.sh (general queue management)
-# - git-safe.sh (git-specific safety checks)
+# - git-specific safety checks (integrated)
 # - make-sequential.sh (make-specific handling)
 # - Automatic command atomification
 #
