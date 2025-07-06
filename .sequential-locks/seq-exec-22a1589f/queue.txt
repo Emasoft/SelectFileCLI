@@ -1,3 +1,4 @@
-26478:1751809487:echo /tmp/test_atomification/test2.py
-26924:1751809500:ruff check /tmp/test_atomify/test2.py
-28648:1751809572:mypy /tmp/test_atomify/test1.py
+51117:1751811563:echo Starting tests
+51202:1751811569:ruff check /tmp/test_atomify_v7/test1.py
+51202:1751811569:ruff check /tmp/test_atomify_v7/test2.py
+51281:1751811574:echo Tests complete
