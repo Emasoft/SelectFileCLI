@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sequential_queue.sh - Universal sequential execution queue manager
-# Version: 8.3.0
+# Version: 8.4.0
 #
 # This version implements the correct flow:
 # 1. Commands are added to queue (atomified if possible)
@@ -9,6 +9,17 @@
 # 4. All commands execute in exact order of addition
 #
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# v8.4.0:
+# - Fixed USER variable conflict by renaming to RUN_USER throughout
+# - Added cross-platform date parsing function parse_date_to_epoch()
+# - Added missing docstrings for utility functions
+# - Fixed timeout_info validation in check_pipeline_timeout()
+# - Simplified bash version check using BASH_VERSINFO array
+# - Replaced ls usage in loops with glob expansion for efficiency
+# - Added warning for unused 'attempt' parameter (retry not implemented)
+# - Moved PUBLISHING.md and RELEASE_PROCESS.md to DOCS_DEV/
+# - Removed old script versions (v4-v7, backup) to reduce clutter
+# - Removed duplicate docs/ATOMIFICATION_FEATURE.md
 # v8.3.0:
 # - Implemented all 4 "missing" filters: user, commit, event, created
 # - Enhanced metadata storage to capture git user, commit SHA, and created date
@@ -26,7 +37,7 @@
 #
 set -euo pipefail
 
-VERSION='8.3.0'
+VERSION='8.4.0'
 
 # Constants
 readonly DEFAULT_LIST_LIMIT=20
@@ -39,7 +50,7 @@ readonly DEFAULT_PIPELINE_TIMEOUT=86400
 # Display help message
 show_help() {
     cat << 'EOF'
-sequential_queue.sh v8.3.0 - Universal sequential execution queue
+sequential_queue.sh v8.4.0 - Universal sequential execution queue
 
 USAGE:
     sequential_queue.sh [OPTIONS] -- COMMAND [ARGS...]
@@ -231,13 +242,13 @@ queue_status() {
 
 # Helper function to load metadata from a file into variables
 # Usage: load_metadata <file_path>
-# Sets: RUN_ID, START_TIME, PID, STATUS, PROJECT, END_TIME, DURATION, EXIT_CODE, BRANCH, WORKFLOW, USER, COMMIT, EVENT, CREATED
+# Sets: RUN_ID, START_TIME, PID, STATUS, PROJECT, END_TIME, DURATION, EXIT_CODE, BRANCH, WORKFLOW, RUN_USER, COMMIT, EVENT, CREATED
 load_metadata() {
     local meta_file="$1"
     
     # Reset variables
     RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE="" BRANCH="" WORKFLOW=""
-    USER="" COMMIT="" EVENT="" CREATED=""  # New fields
+    RUN_USER="" COMMIT="" EVENT="" CREATED=""  # New fields (RUN_USER to avoid conflict with system USER)
     JOB_ID="" COMMAND="" LOG_FILE=""  # Job-specific fields
     
     if [[ ! -f "$meta_file" ]]; then
@@ -256,7 +267,8 @@ load_metadata() {
             EXIT_CODE) EXIT_CODE="$value" ;;
             BRANCH) BRANCH="$value" ;;
             WORKFLOW) WORKFLOW="$value" ;;
-            USER) USER="$value" ;;
+            USER) RUN_USER="$value" ;;  # Map old USER field to RUN_USER
+            RUN_USER) RUN_USER="$value" ;;
             COMMIT) COMMIT="$value" ;;
             EVENT) EVENT="$value" ;;
             CREATED) CREATED="$value" ;;
@@ -269,8 +281,8 @@ load_metadata() {
     done < "$meta_file"
     
     # Provide defaults for backward compatibility
-    if [[ -z "$USER" ]]; then
-        USER="${USER:-unknown}"
+    if [[ -z "$RUN_USER" ]]; then
+        RUN_USER="${USER:-unknown}"  # Use system USER as fallback
     fi
     if [[ -z "$EVENT" ]]; then
         EVENT="manual"
@@ -321,14 +333,30 @@ calculate_duration() {
     local start_time="$1"
     local end_time="$2"
     
-    local start_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$start_time" "+%s" 2>/dev/null || date -d "$start_time" "+%s")
-    local end_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$end_time" "+%s" 2>/dev/null || date -d "$end_time" "+%s")
+    local start_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$start_time" "+%s" 2>/dev/null || date -d "$start_time" "+%s" 2>/dev/null || echo 0)
+    local end_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$end_time" "+%s" 2>/dev/null || date -d "$end_time" "+%s" 2>/dev/null || echo 0)
     local duration=$((end_epoch - start_epoch))
     local hours=$((duration / 3600))
     local minutes=$(((duration % 3600) / 60))
     local seconds=$((duration % 60))
     
     DURATION_STR="${hours}h ${minutes}m ${seconds}s"
+}
+
+# Helper function for cross-platform date parsing
+# Usage: parse_date_to_epoch <date_string> [format]
+# Returns: epoch time or 0 on failure
+parse_date_to_epoch() {
+    local date_str="$1"
+    local format="${2:-%Y-%m-%d %H:%M:%S}"
+    
+    # Try macOS date first
+    local epoch=$(date -j -f "$format" "$date_str" "+%s" 2>/dev/null)
+    if [[ -z "$epoch" ]] || [[ "$epoch" == "0" ]]; then
+        # Try GNU date
+        epoch=$(date -d "$date_str" "+%s" 2>/dev/null || echo 0)
+    fi
+    echo "${epoch:-0}"
 }
 
 # Queue management functions
@@ -378,7 +406,7 @@ STATUS=running
 PROJECT=$PROJECT_ROOT
 BRANCH=$current_branch
 WORKFLOW=sequential_queue
-USER=$git_user
+RUN_USER=$git_user
 COMMIT=$commit_sha
 EVENT=manual
 CREATED=$run_start
@@ -410,7 +438,7 @@ EOF
 
     # Calculate run duration if run start file exists
     if [[ -f "$RUN_START_FILE" ]]; then
-        local start_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$run_start" "+%s" 2>/dev/null || date -d "$run_start" "+%s")
+        local start_epoch=$(parse_date_to_epoch "$run_start")
         local end_epoch=$(date "+%s")
         local duration=$((end_epoch - start_epoch))
         local hours=$((duration / 3600))
@@ -475,7 +503,7 @@ queue_stop() {
         echo "Exit Code: 130 (User stopped)" >> "$RUN_LOG"
 
         # Calculate run duration
-        local start_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$run_start" "+%s" 2>/dev/null || date -d "$run_start" "+%s")
+        local start_epoch=$(parse_date_to_epoch "$run_start")
         local end_epoch=$(date "+%s")
         local duration=$((end_epoch - start_epoch))
         local hours=$((duration / 3600))
@@ -605,11 +633,22 @@ list_runs() {
     # Get runs sorted by date (newest first)
     local runs=()
     if [[ -d "$RUNS_DIR" ]]; then
-        for run_dir in $(ls -1t "$RUNS_DIR" 2>/dev/null); do
-            if [[ -f "${RUNS_DIR}/${run_dir}/metadata.txt" ]]; then
-                runs+=("$run_dir")
-            fi
+        # Use glob expansion instead of ls
+        local run_dirs=()
+        for run_path in "$RUNS_DIR"/*; do
+            [[ -d "$run_path" ]] || continue
+            local run_dir=$(basename "$run_path")
+            [[ -f "${run_path}/metadata.txt" ]] || continue
+            run_dirs+=("$run_dir")
         done
+        # Sort by modification time using stat
+        if [[ ${#run_dirs[@]} -gt 0 ]]; then
+            while IFS= read -r run_dir; do
+                runs+=("$run_dir")
+            done < <(for dir in "${run_dirs[@]}"; do
+                stat -f "%m %N" "$RUNS_DIR/$dir" 2>/dev/null || stat -c "%Y %n" "$RUNS_DIR/$dir" 2>/dev/null
+            done | sort -rn | cut -d' ' -f2- | xargs -n1 basename)
+        fi
     fi
     
     if [[ ${#runs[@]} -eq 0 ]]; then
@@ -659,7 +698,7 @@ list_runs() {
         fi
         
         # Apply additional filters
-        if [[ -n "$user_filter" ]] && [[ "$USER" != "$user_filter" ]]; then
+        if [[ -n "$user_filter" ]] && [[ "$RUN_USER" != "$user_filter" ]]; then
             continue
         fi
         
@@ -674,9 +713,9 @@ list_runs() {
         # Date filter - compare created date
         if [[ -n "$created_filter" ]]; then
             # Convert both dates to epoch for comparison
-            local created_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "${CREATED:-$START_TIME}" "+%s" 2>/dev/null || date -d "${CREATED:-$START_TIME}" "+%s" 2>/dev/null)
-            local filter_epoch=$(date -j -f "%Y-%m-%d" "$created_filter" "+%s" 2>/dev/null || date -d "$created_filter" "+%s" 2>/dev/null)
-            if [[ $created_epoch -lt $filter_epoch ]]; then
+            local created_epoch=$(parse_date_to_epoch "${CREATED:-$START_TIME}")
+            local filter_epoch=$(parse_date_to_epoch "$created_filter" "%Y-%m-%d")
+            if [[ $created_epoch -eq 0 ]] || [[ $filter_epoch -eq 0 ]] || [[ $created_epoch -lt $filter_epoch ]]; then
                 continue
             fi
         fi
@@ -684,7 +723,10 @@ list_runs() {
         # Count jobs
         local job_count=0
         if [[ -d "${RUNS_DIR}/${run}/jobs" ]]; then
-            job_count=$(ls -1 "${RUNS_DIR}/${run}/jobs" 2>/dev/null | wc -l | tr -d ' ')
+            # Count job files using glob
+            for job_file in "${RUNS_DIR}/${run}/jobs"/*; do
+                [[ -f "$job_file" ]] && ((job_count++))
+            done
         fi
         
         if [[ "$json_output" == "true" ]]; then
@@ -720,7 +762,7 @@ list_runs() {
             json_array+="\"startedAt\":\"$START_TIME\","
             json_array+="\"workflowDatabaseId\":1,"
             json_array+="\"url\":\"file://${RUNS_DIR}/${run}\","
-            json_array+="\"actor\":{\"login\":\"${USER:-unknown}\"},"
+            json_array+="\"actor\":{\"login\":\"${RUN_USER:-unknown}\"},"
             json_array+="\"event\":\"${EVENT:-manual}\""
             json_array+="}"
         else
@@ -788,9 +830,12 @@ watch_run() {
     # If no run_id specified, get the latest running run
     if [[ -z "$run_id" ]]; then
         if [[ -d "$RUNS_DIR" ]]; then
-            for run_dir in $(ls -1t "$RUNS_DIR" 2>/dev/null); do
-                if [[ -f "${RUNS_DIR}/${run_dir}/metadata.txt" ]]; then
-                    local test_status=$(grep "^STATUS=" "${RUNS_DIR}/${run_dir}/metadata.txt" | cut -d= -f2)
+            # Find the latest running run using glob
+            for run_path in "$RUNS_DIR"/*; do
+                [[ -d "$run_path" ]] || continue
+                local run_dir=$(basename "$run_path")
+                if [[ -f "${run_path}/metadata.txt" ]]; then
+                    local test_status=$(grep "^STATUS=" "${run_path}/metadata.txt" | cut -d= -f2)
                     if [[ "$test_status" == "running" ]]; then
                         run_id="$run_dir"
                         break
@@ -837,8 +882,9 @@ watch_run() {
         echo "====="
         local job_count=0
         if [[ -d "${RUNS_DIR}/${run_id}/jobs" ]]; then
-            for job_file in $(ls -1t "${RUNS_DIR}/${run_id}/jobs" 2>/dev/null); do
-                local job_meta="${RUNS_DIR}/${run_id}/jobs/${job_file}"
+            for job_path in "${RUNS_DIR}/${run_id}/jobs"/*; do
+                [[ -f "$job_path" ]] || continue
+                local job_meta="$job_path"
                 local JOB_ID="" JOB_STATUS="" JOB_COMMAND="" JOB_START="" JOB_END="" JOB_EXIT=""
                 while IFS='=' read -r key value; do
                     case "$key" in
@@ -899,7 +945,7 @@ watch_run() {
 #   $4 - show_failed: Show only failed job logs (true/false)
 #   $5 - verbose: Show detailed job steps (true/false)
 #   $6 - exit_status: Exit with run's exit status (true/false)
-#   $7 - attempt: Show logs for specific attempt number
+#   $7 - attempt: Show logs for specific attempt number (not implemented - no retry mechanism)
 #
 # Returns:
 #   0 on success, 1 on error, or run's exit code if exit_status is true
@@ -912,6 +958,12 @@ view_runs() {
     local verbose="$5"
     local exit_status="$6"
     local attempt="$7"
+    
+    # Note: attempt parameter is accepted for GitHub CLI compatibility but not used
+    # as this implementation doesn't support retrying failed runs
+    if [[ -n "$attempt" ]] && [[ "$attempt" != "1" ]]; then
+        echo "Warning: Attempt number specified but retry mechanism not implemented" >&2
+    fi
 
     # If no run_id specified, show recent runs interactively
     if [[ -z "$run_id" ]] && [[ -z "$job_id" ]]; then
@@ -1022,8 +1074,8 @@ view_run() {
         echo "Exit Code: $EXIT_CODE"
     fi
     echo "Project: $PROJECT"
-    if [[ -n "${USER:-}" ]]; then
-        echo "User: $USER"
+    if [[ -n "${RUN_USER:-}" ]]; then
+        echo "User: $RUN_USER"
     fi
     if [[ -n "${BRANCH:-}" ]]; then
         echo "Branch: $BRANCH"
@@ -1459,8 +1511,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Verify minimum bash version
-if [ "${BASH_VERSION%%.*}" -lt 3 ] || { [ "${BASH_VERSION%%.*}" -eq 3 ] && [ "${BASH_VERSION#*.}" -lt 2 ]; }; then
+# Verify minimum bash version (3.2+)
+if [[ "${BASH_VERSINFO[0]}" -lt 3 ]] || { [[ "${BASH_VERSINFO[0]}" -eq 3 ]] && [[ "${BASH_VERSINFO[1]}" -lt 2 ]]; }; then
     echo "ERROR: This script requires bash 3.2 or higher" >&2
     echo "Current version: $BASH_VERSION" >&2
     exit 1
@@ -1546,7 +1598,14 @@ log() {
     echo "$msg" >> "$EXEC_LOG"
 }
 
-# Get all descendant PIDs
+# Get all descendant PIDs of a given process
+# Recursively finds all child processes
+#
+# Arguments:
+#   $1 - pid: Process ID to find descendants for
+#
+# Returns:
+#   Prints PIDs of all descendants, one per line
 get_descendants() {
     local pid=$1
     local children
@@ -1557,7 +1616,15 @@ get_descendants() {
     done
 }
 
-# Kill entire process tree
+# Kill entire process tree including all descendants
+# Sends signal to parent and all child processes
+#
+# Arguments:
+#   $1 - pid: Root process ID to kill
+#   $2 - signal: Signal to send (default: TERM)
+#
+# Returns:
+#   0 on success (all processes terminated)
 kill_process_tree() {
     local pid=$1
     local signal=${2:-TERM}
@@ -1584,7 +1651,14 @@ kill_process_tree() {
     done
 }
 
-# Git-specific safety checks
+# Git-specific safety checks to prevent concurrent operations
+# Checks for existing git processes that might conflict
+#
+# Arguments:
+#   $1 - git_cmd: Git subcommand being executed (e.g., commit, push)
+#
+# Returns:
+#   0 if safe to proceed, 1 if conflict detected
 check_git_safety() {
     local git_cmd="${1:-}"
 
@@ -1625,7 +1699,14 @@ check_git_safety() {
     return 0
 }
 
-# Make-specific handling
+# Prepare make command with safety options
+# Ensures make runs with -j1 to prevent parallel builds
+#
+# Arguments:
+#   $@ - make command arguments
+#
+# Returns:
+#   Prints modified make arguments
 prepare_make_command() {
     local make_args=("$@")
 
@@ -1648,6 +1729,13 @@ prepare_make_command() {
 }
 
 # Check and enforce pipeline timeout
+# Monitors total execution time and kills all processes if exceeded
+#
+# Arguments:
+#   None (uses global PIPELINE_TIMEOUT variable)
+#
+# Returns:
+#   0 if within timeout, exits script if timeout exceeded
 check_pipeline_timeout() {
     if [ ! -f "$PIPELINE_TIMEOUT_FILE" ]; then
         # First process in pipeline - set timeout
@@ -1688,6 +1776,11 @@ check_pipeline_timeout() {
         # Check if pipeline already timed out
         local timeout_info
         timeout_info=$(cat "$PIPELINE_TIMEOUT_FILE" 2>/dev/null || echo "0:0")
+        # Validate timeout_info format
+        if [[ ! "$timeout_info" =~ ^[0-9]+:[0-9]+$ ]]; then
+            log WARN "Invalid pipeline timeout format, resetting"
+            timeout_info="0:0"
+        fi
         local start_time
         start_time=$(echo "$timeout_info" | cut -d: -f1)
         local timeout_val
@@ -2027,6 +2120,7 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
     echo "[SEQ-QUEUE] Command added to queue"
     echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
 fi
+
 
 
 
