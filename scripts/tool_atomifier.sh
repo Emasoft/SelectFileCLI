@@ -326,7 +326,7 @@ generate_atomic_commands() {
     
     if [[ ${#file_args[@]} -eq 0 ]]; then
         # No file arguments found, run as-is
-        echo "ATOMIC:wait_all.sh -- ${original_cmd[*]}"
+        echo "ATOMIC:${original_cmd[*]}"
         return
     fi
     
@@ -358,7 +358,7 @@ generate_atomic_commands() {
     
     if [[ ${#unique_files[@]} -eq 0 ]]; then
         # No files found after expansion
-        echo "ATOMIC:wait_all.sh -- ${original_cmd[*]}"
+        echo "ATOMIC:${original_cmd[*]}"
         return
     fi
     
@@ -409,7 +409,7 @@ generate_atomic_commands() {
             atomic_cmd+=("$file")
         fi
         
-        echo "ATOMIC:wait_all.sh -- ${atomic_cmd[*]}"
+        echo "ATOMIC:${atomic_cmd[*]}"
     done
 }
 
