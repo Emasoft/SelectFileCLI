@@ -2,7 +2,7 @@
 # Using standard hooks with require_serial for sequential execution
 
 default_language_version:
-  python: python3.11
+  python: python3.12
 
 default_stages: [pre-commit]
 

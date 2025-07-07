@@ -812,11 +812,15 @@ class TestSortDialogAdditional:
         app = FileBrowserApp()
 
         async with app.run_test() as pilot:
+            # Store original path
+            original_path = app.current_path
+            
             # Try to change to non-existent directory
-            await app._change_directory(Path("/this/does/not/exist"))
+            # Note: _change_directory is synchronous, no await needed
+            app._change_directory(Path("/this/does/not/exist"))
 
             # Should remain in original directory
-            assert app.current_path == app.start_path
+            assert app.current_path == original_path
 
     @pytest.mark.asyncio
     async def test_file_size_formatting(self):
