@@ -33,7 +33,7 @@ jobs:
     - name: Check current lock status
       run: |
         # Check if lock file is out of date
-        if ./scripts/sep_queue.sh --timeout 600 -- uv lock --check; then
+        if uv lock --check; then
           echo "Lock file is up to date"
           echo "NEEDS_UPDATE=false" >> $GITHUB_ENV
         else
@@ -45,27 +45,27 @@ jobs:
       if: env.NEEDS_UPDATE == 'true'
       run: |
         # Update the lock file with latest compatible versions
-        ./scripts/sep_queue.sh --timeout 1800 -- uv lock
+        uv lock
 
     - name: Sync dependencies
       run: |
         # Sync to ensure environment matches lock file
-        ./scripts/sep_queue.sh --timeout 1800 -- uv sync --locked
+        uv sync --locked
 
     - name: Update development dependencies
       run: |
         # Also update dev and optional dependencies
-        ./scripts/sep_queue.sh --timeout 600 -- uv sync --locked --all-extras
+        uv sync --locked --all-extras
 
     - name: Run dependency check
       run: |
         # Verify all dependencies are properly declared
-        ./scripts/sep_queue.sh --timeout 600 -- uv run deptry .
+        uv run deptry .
 
     - name: Run security audit
       run: |
         # Check for known vulnerabilities
-        ./scripts/sep_queue.sh --timeout 600 -- uv run pip-audit || true
+        uv run pip-audit || true
 
     - name: Generate dependency report
       run: |

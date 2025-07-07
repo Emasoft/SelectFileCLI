@@ -43,27 +43,25 @@ jobs:
         }
     - name: Update version in pyproject.toml
       run: |
-        ./scripts/sep_queue.sh --timeout 300 -- sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' pyproject.toml
+        sed -i 's/^version = ".*"/version = "${{ inputs.version }}"/' pyproject.toml
     - name: Install dependencies
       run: |
         uv sync --locked
     - name: Check dependencies with deptry
       run: |
-        ./scripts/sep_queue.sh --timeout 600 -- uv run deptry .
+        uv run deptry .
     - name: Run tests
       run: |
-        ./scripts/sep_queue.sh --timeout 1800 -- uv run pytest --tb=short
+        uv run pytest --tb=short
     - name: Build package
       run: |
-        ./scripts/sep_queue.sh --timeout 3600 -- uv build
+        uv build
     - name: Commit version bump
       run: |
-        ./scripts/sep_queue.sh --timeout 300 -- bash -c '
-          git config --local user.email "713559+Emasoft@users.noreply.github.com" &&
-          git config --local user.name "Emasoft" &&
-          git add pyproject.toml &&
-          git commit -m "chore: bump version to ${{ inputs.version }}"
-        '
+        git config --local user.email "713559+Emasoft@users.noreply.github.com"
+        git config --local user.name "Emasoft"
+        git add pyproject.toml
+        git commit -m "chore: bump version to ${{ inputs.version }}"
     - name: Create and push tag
       run: |
         git tag -a "v${{ inputs.version }}" -m "Release v${{ inputs.version }}"

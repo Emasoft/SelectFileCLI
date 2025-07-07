@@ -43,22 +43,22 @@ jobs:
     - name: Fix Python formatting with ruff
       run: |
         # Format all Python files
-        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --line-length=320 .
+        uv run ruff format --line-length=320 .
 
     - name: Fix Python linting issues with ruff
       run: |
         # Auto-fix safe linting issues
-        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff check --fix --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated .
+        uv run ruff check --fix --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated .
 
     - name: Sort Python imports
       run: |
         # Sort imports consistently
-        ./scripts/sep_queue.sh --timeout 1800 -- uv run isort --profile black --line-length 320 .
+        uv run isort --profile black --line-length 320 .
 
     - name: Update Python syntax
       run: |
         # Upgrade Python syntax to modern versions
-        ./scripts/sep_queue.sh --timeout 1800 -- uv run pyupgrade --py310-plus $(find . -name "*.py" -type f)
+        uv run pyupgrade --py310-plus $(find . -name "*.py" -type f)
 
     - name: Fix trailing whitespace
       run: |
@@ -79,7 +79,7 @@ jobs:
     - name: Format YAML files
       run: |
         # Format GitHub workflows
-        ./scripts/sep_queue.sh --timeout 600 -- yamlfmt -path .github/workflows
+        yamlfmt -path .github/workflows
 
     - name: Check for changes
       id: git-check
@@ -97,21 +97,19 @@ jobs:
     - name: Commit fixes
       if: steps.git-check.outputs.changes == 'true'
       run: |
-        ./scripts/sep_queue.sh --timeout 600 -- bash -c '
-          git config --local user.email "713559+Emasoft@users.noreply.github.com"
-          git config --local user.name "Emasoft"
-          git add -A
-          git commit -m "fix: auto-fix formatting and linting issues [skip ci]
+        git config --local user.email "713559+Emasoft@users.noreply.github.com"
+        git config --local user.name "Emasoft"
+        git add -A
+        git commit -m "fix: auto-fix formatting and linting issues [skip ci]
 
-          Auto-fixed:
-          - Python formatting with ruff
-          - Import sorting with isort
-          - Safe linting fixes
-          - Trailing whitespace
-          - End of file newlines
-          - YAML formatting"
-          git push
-        '
+        Auto-fixed:
+        - Python formatting with ruff
+        - Import sorting with isort
+        - Safe linting fixes
+        - Trailing whitespace
+        - End of file newlines
+        - YAML formatting"
+        git push
 
     - name: Comment on PR
       if: steps.git-check.outputs.changes == 'true'
