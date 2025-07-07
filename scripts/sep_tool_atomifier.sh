@@ -9,6 +9,8 @@
 # v8.6.0:
 # - Version bump for consistency across all SEP scripts
 # - Added missing sep_common.sh sourcing
+# - Added unittest support for test-method atomization (second-tier)
+# - unittest atomization only enabled with --enable-second-tier flag
 #
 set -euo pipefail
 
@@ -46,10 +48,16 @@ supports_multiple_files() {
 # Check if a tool requires special atomization
 requires_special_atomization() {
     local tool="$1"
+    local enable_second_tier="${ENABLE_SECOND_TIER:-0}"
 
     case "$tool" in
         pytest)
             return 0
+            ;;
+        unittest)
+            # Only atomize unittest if second-tier tools are enabled
+            [[ "$enable_second_tier" -eq 1 ]] && return 0
+            return 1
             ;;
         *)
             return 1
@@ -301,6 +309,73 @@ expand_path() {
             done
         fi
     fi
+}
+
+# Extract unittest test methods from a Python test file
+extract_unittest_methods() {
+    local test_file="$1"
+
+    # Use Python to find unittest test methods
+    python3 -c "
+import ast
+import sys
+import os
+
+test_file = '$test_file'
+
+if not os.path.exists(test_file):
+    sys.exit(1)
+
+try:
+    with open(test_file, 'r') as f:
+        tree = ast.parse(f.read())
+
+    # Find all test methods in TestCase classes
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            # Check if it inherits from TestCase or starts with Test
+            is_test_class = False
+            if node.name.startswith('Test'):
+                is_test_class = True
+            else:
+                # Check base classes
+                for base in node.bases:
+                    if isinstance(base, ast.Name) and 'TestCase' in base.id:
+                        is_test_class = True
+                        break
+                    elif isinstance(base, ast.Attribute) and base.attr == 'TestCase':
+                        is_test_class = True
+                        break
+
+            if is_test_class:
+                # Find test methods
+                for item in node.body:
+                    if isinstance(item, ast.FunctionDef) and item.name.startswith('test'):
+                        print(f'{node.name}.{item.name}')
+                    elif isinstance(item, ast.AsyncFunctionDef) and item.name.startswith('test'):
+                        print(f'{node.name}.{item.name}')
+except Exception as e:
+    # Fallback to regex if AST parsing fails
+    import re
+    try:
+        with open(test_file, 'r') as f:
+            content = f.read()
+            # Find test classes
+            class_pattern = r'^class\\s+(\\w+)\\s*\\([^)]*TestCase[^)]*\\)|^class\\s+(Test\\w+)'
+            method_pattern = r'^\\s+(async\\s+)?def\\s+(test_\\w+)'
+
+            current_class = None
+            for line in content.split('\\n'):
+                class_match = re.match(class_pattern, line)
+                if class_match:
+                    current_class = class_match.group(1) or class_match.group(2)
+                elif current_class:
+                    method_match = re.match(method_pattern, line)
+                    if method_match:
+                        print(f'{current_class}.{method_match.group(2)}')
+    except:
+        sys.exit(1)
+" 2>/dev/null
 }
 
 # Extract test functions from a Python test file using pytest --collect-only
@@ -644,6 +719,137 @@ generate_pytest_atomic_commands() {
     set -e  # Re-enable error exit
 }
 
+# Generate unittest atomic commands for individual test methods
+generate_unittest_atomic_commands() {
+    set +e  # Temporarily disable error exit
+    local original_cmd=("$@")
+    local file_args=()
+    local non_file_args=()
+    local has_k_flag=0
+    local has_m_flag=0
+    local discover_mode=0
+
+    # Parse arguments
+    for ((i=0; i<${#original_cmd[@]}; i++)); do
+        local arg="${original_cmd[$i]}"
+
+        # Skip unittest itself or python -m unittest
+        if [[ "$arg" == "unittest" ]] || [[ "$arg" == "-m" && "${original_cmd[$((i+1))]}" == "unittest" ]]; then
+            non_file_args+=("$arg")
+            continue
+        fi
+
+        # Check for -k flag (pattern matching)
+        if [[ "$arg" == "-k" ]]; then
+            has_k_flag=1
+            non_file_args+=("$arg")
+            if [[ $((i + 1)) -lt ${#original_cmd[@]} ]]; then
+                ((i++))
+                non_file_args+=("${original_cmd[$i]}")
+            fi
+            continue
+        fi
+
+        # Check for -m flag (already running specific method)
+        if [[ "$arg" =~ ^.*\.test_.*$ ]]; then
+            has_m_flag=1
+            non_file_args+=("$arg")
+            continue
+        fi
+
+        # Check for discover mode
+        if [[ "$arg" == "discover" ]]; then
+            discover_mode=1
+            non_file_args+=("$arg")
+            continue
+        fi
+
+        # Check if it's a file or module
+        if [[ "$arg" != -* ]]; then
+            # Check if it's a file path
+            if [[ -f "$arg" ]] || [[ "$arg" == *.py ]]; then
+                file_args+=("$arg")
+            # Check if it's a module.class.method pattern
+            elif [[ "$arg" =~ ^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$ ]]; then
+                # Could be a module or test spec
+                if [[ "$arg" =~ \.test_ ]]; then
+                    # Already specific test method
+                    has_m_flag=1
+                    non_file_args+=("$arg")
+                else
+                    # Module or class
+                    file_args+=("$arg")
+                fi
+            else
+                non_file_args+=("$arg")
+            fi
+        else
+            non_file_args+=("$arg")
+        fi
+    done
+
+    # If already running specific test or in discover mode, don't atomize
+    if [[ $has_m_flag -eq 1 ]] || [[ $has_k_flag -eq 1 ]] || [[ $discover_mode -eq 1 ]]; then
+        echo "ATOMIC:${original_cmd[*]}"
+        return
+    fi
+
+    # If no files/modules specified, don't atomize
+    if [[ ${#file_args[@]} -eq 0 ]]; then
+        echo "ATOMIC:${original_cmd[*]}"
+        return
+    fi
+
+    # Process each file/module
+    for arg in "${file_args[@]}"; do
+        local test_file=""
+
+        # Convert module to file path if needed
+        if [[ -f "$arg" ]]; then
+            test_file="$arg"
+        else
+            # Try to find the file for the module
+            local module_path="${arg//.//}.py"
+            if [[ -f "$module_path" ]]; then
+                test_file="$module_path"
+            else
+                # Can't find file, run as-is
+                echo "ATOMIC:${non_file_args[*]} $arg"
+                continue
+            fi
+        fi
+
+        # Extract test methods
+        local test_methods=()
+        if ! mapfile -t test_methods < <(extract_unittest_methods "$test_file"); then
+            if [[ "${DEBUG:-0}" -eq 1 ]]; then
+                echo "DEBUG: Failed to extract test methods from $test_file" >&2
+            fi
+            # Fall back to running the whole file
+            echo "ATOMIC:${non_file_args[*]} $arg"
+            continue
+        fi
+
+        if [[ "${DEBUG:-0}" -eq 1 ]]; then
+            echo "DEBUG: Found ${#test_methods[@]} test methods" >&2
+        fi
+
+        if [[ ${#test_methods[@]} -eq 0 ]]; then
+            # No test methods found, run the whole file
+            echo "ATOMIC:${non_file_args[*]} $arg"
+        else
+            # Generate commands for each test method
+            for test_method in "${test_methods[@]}"; do
+                # For unittest, use module.class.method format
+                local module_name="${arg%.py}"
+                module_name="${module_name//\//.}"
+                echo "ATOMIC:${non_file_args[*]} ${module_name}.${test_method}"
+            done
+        fi
+    done
+    set -e  # Re-enable error exit
+}
+
 # Generate atomic commands
 generate_atomic_commands() {
     local original_cmd=("$@")
@@ -686,6 +892,10 @@ generate_atomic_commands() {
         case "$check_tool" in
             pytest*)
                 generate_pytest_atomic_commands "${original_cmd[@]}"
+                return $?
+                ;;
+            unittest)
+                generate_unittest_atomic_commands "${original_cmd[@]}"
                 return $?
                 ;;
         esac
