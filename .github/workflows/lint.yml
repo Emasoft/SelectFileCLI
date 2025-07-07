@@ -19,25 +19,45 @@ jobs:
     - name: Install dependencies
       run: |
         uv sync --locked
+    - name: Setup SEP
+      uses: ./.github/actions/setup-sep
+      with:
+        memory-limit: '2048'
+        timeout: '1800'
+
     - name: Install actionlint
       run: |
         curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
         sudo mv actionlint /usr/local/bin/
-    - name: Lint with ruff
-      run: |
-        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
-    - name: Format check with ruff
-      run: |
-        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320
-    - name: Type check with mypy
-      run: |
-        ./scripts/sep_queue.sh --timeout 7200 -- uv run mypy --install-types --non-interactive src/selectfilecli
-    - name: Check dependencies with deptry
-      run: |
-        ./scripts/sep_queue.sh --timeout 3600 -- uv run deptry src
-    - name: Lint YAML files
-      run: |
-        ./scripts/sep_queue.sh --timeout 1800 -- uv run yamllint .github/workflows/*.yml
-    - name: Lint GitHub Actions
+
+    - name: Run all lint checks sequentially
       run: |-
-        ./scripts/sep_queue.sh --timeout 1800 -- actionlint
+        # Create a script with all lint commands
+        cat > lint_all.sh << 'EOF'
+        #!/usr/bin/env bash
+        set -euo pipefail
+
+        echo "=== Running ruff check ==="
+        uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
+
+        echo "=== Running ruff format check ==="
+        uv run ruff format --check --line-length=320
+
+        echo "=== Running mypy ==="
+        uv run mypy --install-types --non-interactive src/selectfilecli
+
+        echo "=== Running deptry ==="
+        uv run deptry src
+
+        echo "=== Running yamllint ==="
+        uv run yamllint .github/workflows/*.yml
+
+        echo "=== Running actionlint ==="
+        actionlint
+        EOF
+
+        chmod +x lint_all.sh
+
+        # Execute all commands sequentially through SEP
+        ./scripts/sep_queue.sh --timeout 7200 -- ./lint_all.sh
+        ./scripts/sep_queue.sh --queue-start

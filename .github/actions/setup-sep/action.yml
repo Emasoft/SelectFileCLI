@@ -1,0 +1,53 @@
+name: 'Setup SEP'
+description: 'Setup Sequential Execution Pipeline for GitHub Actions'
+inputs:
+  memory-limit:
+    description: 'Memory limit in MB per process'
+    required: false
+    default: '2048'
+  timeout:
+    description: 'Default timeout in seconds'
+    required: false
+    default: '1800'
+  verbose:
+    description: 'Enable verbose output'
+    required: false
+    default: '1'
+
+runs:
+  using: 'composite'
+  steps:
+  - name: Create SEP directories
+    shell: bash
+    run: |
+      mkdir -p logs .sequential-locks
+      touch .sep.log.lock
+
+  - name: Create SEP configuration
+    shell: bash
+    run: |
+      cat > .env.development << EOF
+      # Sequential Execution Pipeline Configuration for CI
+      MEMORY_LIMIT_MB=${{ inputs.memory-limit }}
+      CHECK_INTERVAL=5
+      TIMEOUT=${{ inputs.timeout }}
+      PIPELINE_TIMEOUT=7200
+      VERBOSE=${{ inputs.verbose }}
+      SEQUENTIAL_LOCK_BASE_DIR="./.sequential-locks"
+      WAIT_ALL_LOG_LOCK="./.sep.log.lock"
+      PYTEST_MAX_WORKERS=1
+      CI=true
+      GITHUB_ACTIONS=true
+      EOF
+
+  - name: Make SEP scripts executable
+    shell: bash
+    run: |
+      chmod +x scripts/sep*.sh || true
+
+  - name: Test SEP setup
+    shell: bash
+    run: |-
+      # Basic functionality test
+      ./scripts/sep_queue.sh --help >/dev/null
+      echo "SEP setup completed successfully"

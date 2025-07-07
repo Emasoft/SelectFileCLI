@@ -1,0 +1,88 @@
+# setup-sep.yml - Reusable workflow for installing SEP in CI
+#
+# This workflow installs and configures the Sequential Execution Pipeline
+# for use in GitHub Actions, enabling sequential command execution to
+# prevent process explosions and memory issues.
+#
+name: Setup SEP
+
+on:
+  workflow_call:
+    inputs:
+      memory-limit:
+        description: 'Memory limit in MB per process'
+        required: false
+        default: '2048'
+        type: string
+      timeout:
+        description: 'Default timeout in seconds per command'
+        required: false
+        default: '1800'
+        type: string
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+    - name: Create SEP directories
+      run: |
+        mkdir -p logs
+        mkdir -p .sequential-locks
+        touch .sep.log.lock
+
+    - name: Create SEP environment configuration
+      run: |
+        cat > .env.development << EOF
+        # Sequential Execution Pipeline Configuration
+        # Generated for GitHub Actions
+
+        # Memory limits
+        MEMORY_LIMIT_MB=${{ inputs.memory-limit }}
+        CHECK_INTERVAL=5
+
+        # Timeouts
+        TIMEOUT=${{ inputs.timeout }}
+        PIPELINE_TIMEOUT=7200
+
+        # Debugging
+        VERBOSE=1  # Enable verbose output in CI
+
+        # Lock directory configuration (relative paths)
+        SEQUENTIAL_LOCK_BASE_DIR="./.sequential-locks"
+
+        # sep.sh lock configuration (relative paths)
+        WAIT_ALL_LOG_LOCK="./.sep.log.lock"
+
+        # Python/pytest configuration
+        PYTEST_MAX_WORKERS=1
+
+        # CI-specific settings
+        CI=true
+        GITHUB_ACTIONS=true
+        EOF
+
+    - name: Make SEP scripts executable
+      run: |
+        chmod +x scripts/sep*.sh
+
+    - name: Create SEP command alias
+      run: |
+        # Create convenience alias for CI
+        ln -s scripts/sep_queue.sh sep
+
+    - name: Test SEP installation
+      run: |
+        # Test basic functionality
+        ./scripts/sep_queue.sh --help
+
+        # Test queue and execution
+        ./scripts/sep_queue.sh -- echo "SEP test 1"
+        ./scripts/sep_queue.sh -- echo "SEP test 2"
+        ./scripts/sep_queue.sh --queue-start
+
+    - name: Export SEP environment
+      run: |-
+        # Export for subsequent steps
+        echo "SEP_INSTALLED=true" >> $GITHUB_ENV
+        echo "MEMORY_LIMIT_MB=${{ inputs.memory-limit }}" >> $GITHUB_ENV
+        echo "TIMEOUT=${{ inputs.timeout }}" >> $GITHUB_ENV

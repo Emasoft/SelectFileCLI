@@ -38,15 +38,17 @@ jobs:
         # Use --locked to ensure deterministic installation
         uv sync --locked
 
-    - name: Verify lock file is up to date
-      run: |
-        # Check if lock file needs updating
-        ./scripts/sep_queue.sh --timeout 600 -- uv lock --check
+    - name: Setup SEP
+      uses: ./.github/actions/setup-sep
 
-    - name: Check dependencies with deptry
+    - name: Verify lock file and check dependencies
       run: |
-        # Run deptry to check for dependency issues
+        # Queue commands
+        ./scripts/sep_queue.sh --timeout 600 -- uv lock --check
         ./scripts/sep_queue.sh --timeout 600 -- uv run deptry .
+
+        # Execute queue
+        ./scripts/sep_queue.sh --queue-start
 
     - name: List installed packages
       run: |

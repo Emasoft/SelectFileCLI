@@ -19,9 +19,18 @@ jobs:
     - name: Install dependencies
       run: |
         uv sync --locked
+
+    - name: Setup SEP
+      uses: ./.github/actions/setup-sep
+      with:
+        memory-limit: '2048'
+        timeout: '7200'
+
     - name: Run tests with coverage
       run: |
+        # Queue and execute tests
         ./scripts/sep_queue.sh --timeout 7200 -- uv run pytest -c pytest-ci.ini
+        ./scripts/sep_queue.sh --queue-start
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4
       with:
