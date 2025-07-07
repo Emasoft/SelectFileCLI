@@ -1,15 +1,15 @@
 #!/usr/bin/env bash
 # monitor-queue.sh - Monitor the sequential execution queue and system state
-# Version: 3.0.0
+# Version: 8.4.0
 #
 set -euo pipefail
 
-VERSION='3.0.0'
+VERSION='8.4.0'
 
 # Display help message
 show_help() {
     cat << 'EOF'
-monitor-queue.sh v3.0.0 - Real-time sequential execution queue monitor
+monitor-queue.sh v8.4.0 - Real-time sequential execution queue monitor
 
 USAGE:
     monitor-queue.sh [OPTIONS]
@@ -21,6 +21,7 @@ DESCRIPTION:
 
 OPTIONS:
     --help, -h    Show this help message
+    --version     Show version information
 
 DISPLAY SECTIONS:
     1. Current Execution
@@ -66,6 +67,12 @@ EOF
 # Check for help flag
 if [[ "${1:-}" == "--help" ]] || [[ "${1:-}" == "-h" ]]; then
     show_help
+fi
+
+# Check for version flag
+if [[ "${1:-}" == "--version" ]]; then
+    echo "monitor-queue.sh v$VERSION"
+    exit 0
 fi
 
 # Get project info

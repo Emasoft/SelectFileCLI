@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # tool_atomifier.sh - Tool configuration and atomification logic
-# Version: 1.0.0
+# Version: 8.4.0
 #
 # This script contains the configuration and logic for atomifying commands
 # into individual file operations for sequential execution.
 #
 set -euo pipefail
+
+VERSION='8.4.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -782,12 +784,73 @@ generate_atomic_commands() {
     done
 }
 
+# Display help message
+show_help() {
+    cat << 'EOF'
+tool_atomifier.sh v8.4.0 - Command atomification for sequential execution
+
+USAGE:
+    tool_atomifier.sh [OPTIONS] -- COMMAND [ARGS...]
+    tool_atomifier.sh COMMAND [ARGS...]
+
+DESCRIPTION:
+    Breaks down tool commands into atomic file-level operations.
+    Used internally by sequential_queue.sh to process files individually.
+
+OPTIONS:
+    --help, -h     Show this help message
+    --version      Show version information
+    --debug        Enable debug output
+
+SUPPORTED TOOLS:
+    Python: ruff, mypy, pytest, coverage, isort, black, etc.
+    JavaScript: eslint, prettier, pnpm
+    YAML: yamllint, yamlfmt, actionlint
+    Shell: shellcheck
+    Others: jq, jsonlint, make
+
+EXAMPLES:
+    # Atomify ruff check command
+    tool_atomifier.sh ruff check src/
+    # Output: Multiple ATOMIC: commands, one per file
+
+    # Atomify pytest command
+    tool_atomifier.sh pytest tests/
+    # Output: Multiple ATOMIC: commands, one per test function
+
+    # Debug mode
+    DEBUG=1 tool_atomifier.sh mypy src/
+
+OUTPUT FORMAT:
+    Each line starts with "ATOMIC:" followed by the atomified command.
+    These are consumed by sequential_queue.sh for execution.
+
+EOF
+    exit 0
+}
+
 # Main function for testing
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    # Check for help or version flags
+    case "${1:-}" in
+        --help|-h)
+            show_help
+            ;;
+        --version)
+            echo "tool_atomifier.sh v$VERSION"
+            exit 0
+            ;;
+        --debug)
+            DEBUG=1
+            shift
+            ;;
+    esac
+
     # Test mode
     if [[ $# -eq 0 ]]; then
         echo "Usage: $0 <command>"
         echo "Example: $0 ruff check src/"
+        echo "Run '$0 --help' for detailed information"
         exit 1
     fi
 

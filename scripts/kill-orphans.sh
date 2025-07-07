@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # kill-orphans.sh - Clean up orphaned processes and stale locks
-# Version: 3.0.0
+# Version: 8.4.0
 #
 # This script finds and terminates processes that have been orphaned (parent PID = 1)
 # and removes stale lock files from the sequential execution system.
@@ -13,12 +13,12 @@
 #
 set -euo pipefail
 
-VERSION='3.0.0'
+VERSION='8.4.0'
 
 # Display help message
 show_help() {
     cat << 'EOF'
-kill-orphans.sh v3.0.0 - Emergency cleanup for orphaned processes
+kill-orphans.sh v8.4.0 - Emergency cleanup for orphaned processes
 
 USAGE:
     kill-orphans.sh [OPTIONS]
@@ -30,6 +30,7 @@ DESCRIPTION:
 OPTIONS:
     --dry-run    Show what would be killed without actually killing
     --help, -h   Show this help message
+    --version    Show version information
 
 PROCESSES CHECKED:
     - pytest, python test runners
@@ -65,6 +66,10 @@ DRY_RUN=0
 case "${1:-}" in
     --help|-h)
         show_help
+        ;;
+    --version)
+        echo "kill-orphans.sh v$VERSION"
+        exit 0
         ;;
     --dry-run)
         DRY_RUN=1

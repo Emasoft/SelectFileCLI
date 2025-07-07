@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # memory_monitor.sh - Monitor and kill processes exceeding memory limits
-# Version: 3.0.0
+# Version: 8.4.0
 #
 # This script monitors all child processes of the sequential executor
 # and kills any that exceed the memory limit to prevent system lockup
 #
 set -euo pipefail
 
-VERSION='3.0.0'
+VERSION='8.4.0'
 
 # Reverses the order of lines (cross-platform alternative to tac)
 reverse_lines() {
@@ -197,10 +197,11 @@ monitor_processes() {
 # Display help message
 show_help() {
     cat << EOF
-memory_monitor.sh v${VERSION} - Process memory monitoring and enforcement
+memory_monitor.sh v$VERSION - Process memory monitoring and enforcement
+====================================================================
 
-USAGE:
-    $0 [OPTIONS]
+ USAGE
+   ./memory_monitor.sh [OPTIONS]
 
 DESCRIPTION:
     Monitors process memory usage and kills processes that exceed specified limits.
@@ -212,6 +213,7 @@ OPTIONS:
     --interval SECONDS  Check interval in seconds (default: 5)
     --log-dir PATH      Custom log directory (default: PROJECT_ROOT/logs)
     --help              Show this help message
+    --version           Show version information
 
 EXAMPLES:
     # Monitor current shell with 2GB limit
@@ -270,6 +272,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --help|-h)
             show_help
+            ;;
+        --version)
+            echo "memory_monitor.sh v$VERSION"
+            exit 0
             ;;
         *)
             echo "Unknown option: $1"

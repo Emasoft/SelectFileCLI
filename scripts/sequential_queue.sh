@@ -73,6 +73,7 @@ DESCRIPTION:
 
 OPTIONS:
     --help, -h             Show this help message
+    --version              Show version information
     --timeout SECONDS      Command timeout in seconds (default: 86400)
     --pipeline-timeout SEC Pipeline timeout in seconds (default: 86400)
     --memory-limit MB      Memory limit per process in MB (default: 2048)
@@ -1277,6 +1278,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --help|-h)
             show_help
+            ;;
+        --version)
+            echo "sequential_queue.sh v$VERSION"
+            exit 0
             ;;
         --timeout)
             PARSED_TIMEOUT="$2"

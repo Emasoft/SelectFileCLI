@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # install_sequential.sh - Sequential Pipeline Installation Manager
-# Version: 3.0.0
+# Version: 8.4.0
 #
 # This script consolidates:
 # - ensure-sequential.sh (setup verification)
@@ -14,7 +14,7 @@
 #
 set -euo pipefail
 
-VERSION='3.0.0'
+VERSION='8.4.0'
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -36,13 +36,14 @@ NC='\033[0m'
 # Display help message
 show_help() {
     cat << EOF
-install_sequential.sh v3.0.0 - Sequential Pipeline Installation Manager
+install_sequential.sh v8.4.0 - Sequential Pipeline Installation Manager
 
 USAGE:
     $SCRIPT_NAME install    Install and configure sequential pipeline
     $SCRIPT_NAME doctor     Check system health and configuration
     $SCRIPT_NAME uninstall  Remove configuration (keeps scripts)
     $SCRIPT_NAME --help     Show this help message
+    $SCRIPT_NAME --version  Show version information
 
 COMMANDS:
     install
@@ -94,6 +95,29 @@ ENVIRONMENT:
 EOF
     exit 0
 }
+
+# Calculate file hash (cross-platform)
+calculate_hash() {
+    local file="$1"
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$file" | cut -d' ' -f1
+    elif command -v shasum >/dev/null 2>&1; then
+        shasum -a 256 "$file" | cut -d' ' -f1
+    else
+        echo "unknown"
+    fi
+}
+
+# Expected script versions and hashes
+declare -A EXPECTED_VERSIONS=(
+    ["sequential_queue.sh"]="8.4.0"
+    ["wait_all.sh"]="8.4.0"
+    ["memory_monitor.sh"]="8.4.0"
+    ["monitor-queue.sh"]="8.4.0"
+    ["kill-orphans.sh"]="8.4.0"
+    ["install_sequential.sh"]="8.4.0"
+    ["tool_atomifier.sh"]="8.4.0"
+)
 
 # Logging functions
 log_info() {
@@ -243,6 +267,12 @@ create_directories() {
         mkdir -p "$PROJECT_ROOT/.sequential-locks"
         log_success "Created sequential locks directory"
     fi
+
+    # Create wait_all.sh lock file
+    if [ ! -f "$PROJECT_ROOT/.wait_all.log.lock" ]; then
+        touch "$PROJECT_ROOT/.wait_all.log.lock"
+        log_success "Created wait_all.sh log lock file"
+    fi
 }
 
 create_env_file() {
@@ -269,8 +299,11 @@ PIPELINE_TIMEOUT=86400  # 24 hours for entire pipeline
 # Debugging
 VERBOSE=0               # Set to 1 for verbose output
 
-# Lock directory configuration
-SEQUENTIAL_LOCK_BASE_DIR="${PROJECT_ROOT}/.sequential-locks"  # Project-local locks
+# Lock directory configuration (relative paths)
+SEQUENTIAL_LOCK_BASE_DIR="./.sequential-locks"  # Project-local locks
+
+# wait_all.sh lock configuration (relative paths)
+WAIT_ALL_LOG_LOCK="./.wait_all.log.lock"  # Lock file for wait_all.sh logging
 
 # Python/pytest configuration
 PYTEST_MAX_WORKERS=1    # Force sequential pytest
@@ -297,6 +330,7 @@ logs/
 .env.development
 .env.local
 .sequential-locks/
+.wait_all.log.lock
 
 # Private documentation
 CLAUDE.md
@@ -458,6 +492,7 @@ doctor_check_scripts() {
         "monitor-queue.sh"
         "kill-orphans.sh"
         "install_sequential.sh"
+        "tool_atomifier.sh"
     )
 
     local all_good=true
@@ -467,11 +502,18 @@ doctor_check_scripts() {
             if [ -x "$SCRIPT_DIR/$script" ]; then
                 # Check version
                 local version=$(grep -E "^VERSION=" "$SCRIPT_DIR/$script" 2>/dev/null | cut -d"'" -f2)
-                if [ "$version" = "3.0.0" ]; then
+                local expected_version="${EXPECTED_VERSIONS[$script]}"
+
+                if [ "$version" = "$expected_version" ]; then
                     log_success "$script v$version ✓"
                 else
-                    log_warn "$script v$version (expected v3.0.0)"
+                    log_warn "$script v$version (expected v$expected_version)"
+                    all_good=false
                 fi
+
+                # Calculate and show hash for security
+                local hash=$(calculate_hash "$SCRIPT_DIR/$script" | cut -c1-12)
+                echo "     Hash: ${hash}..."
             else
                 log_fail "$script not executable"
                 all_good=false
@@ -571,6 +613,8 @@ doctor_check_environment() {
         echo "  TIMEOUT: ${TIMEOUT:-not set}"
         echo "  PIPELINE_TIMEOUT: ${PIPELINE_TIMEOUT:-not set}"
         echo "  VERBOSE: ${VERBOSE:-not set}"
+        echo "  SEQUENTIAL_LOCK_BASE_DIR: ${SEQUENTIAL_LOCK_BASE_DIR:-not set}"
+        echo "  WAIT_ALL_LOG_LOCK: ${WAIT_ALL_LOG_LOCK:-not set}"
     else
         log_fail ".env.development missing"
     fi
@@ -587,6 +631,20 @@ doctor_check_environment() {
         log_success "logs/ directory exists"
     else
         log_fail "logs/ directory missing"
+    fi
+
+    if [ -d "$PROJECT_ROOT/.sequential-locks" ]; then
+        log_success ".sequential-locks/ directory exists"
+    else
+        log_fail ".sequential-locks/ directory missing"
+    fi
+
+    # Check lock files
+    echo -e "\n${BLUE}Lock files:${NC}"
+    if [ -f "$PROJECT_ROOT/.wait_all.log.lock" ]; then
+        log_success ".wait_all.log.lock exists"
+    else
+        log_fail ".wait_all.log.lock missing"
     fi
 
     # Check symlinks
@@ -750,6 +808,11 @@ main() {
 
         --help|-h|help)
             show_help
+            ;;
+
+        --version)
+            echo "install_sequential.sh v$VERSION"
+            exit 0
             ;;
 
         *)

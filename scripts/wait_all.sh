@@ -129,7 +129,7 @@
 #
 # -------------------------------------------------------------------------
 
-VERSION='3.0.0'
+VERSION='8.4.0'
 
 # ───────────────────────── Strict-mode & traps ───────────────────────────
 set -Eeuo pipefail
@@ -191,6 +191,9 @@ OPTIONS
 
   --help
         Print this help and exit 0.
+
+  --version
+        Print version information and exit 0.
 
 EXIT STATUS
   0      Wrapped command eventually succeeded.
@@ -307,7 +310,103 @@ SPAWNED_PIDS=()
 SPAWNED_PGIDS=()
 CLEANUP_IN_PROGRESS=0
 
+# ──────────────  FINAL-LAYER STATE & LOGGING ────────────────────────────────
+FIN_LOGGED=0          # 1 ⇒ finalise() already executed
+EXIT_REASON="ok"      # ok|error|timeout|sig
+EXIT_CODE=0           # script’s eventual exit code
+ACTIVE_PGID=""        # pgid of current child tree (set in run_once)
+
+# Project root discovery (git top-level or script dir)
+if command -v git >/dev/null 2>&1 && git rev-parse --show-toplevel >/dev/null 2>&1; then
+  PROJECT_ROOT=$(git rev-parse --show-toplevel)
+else
+  PROJECT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+fi
+
+# Load local development overrides
+if [[ -f "$PROJECT_ROOT/.env.development" ]]; then
+  # shellcheck source=/dev/null
+  . "$PROJECT_ROOT/.env.development"
+fi
+
+SLEEP_DELAY=${SLEEP_DELAY:-0.2}    # fractional sleep; adjust for portability
+# Logging files
+LOG_FILE=${LOG_FILE:-"$PROJECT_ROOT/wait_all.log"}
+LOG_LOCK_FILE=${LOG_LOCK_FILE:-${WAIT_ALL_LOG_LOCK:-"$PROJECT_ROOT/.wait_all.log.lock"}}
+touch "$LOG_FILE" "$LOG_LOCK_FILE" 2>/dev/null || true
+
+# JSON logging flag
+LOG_JSON=${LOG_JSON:-0}
+
+# Gather user & commit meta (best‑effort)
+GIT_USER=$(git config --get user.name 2>/dev/null || echo "${USER:-unknown}")
+GIT_EMAIL=$(git config --get user.email 2>/dev/null || true)
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+
+# ────────────────────────────────────────────────────────────────────────────
+
+
 # Store our own PID and parent PID to avoid killing them
+# -------- Realtime logger (gh‑style) --------------------------------
+log_event() {
+  local msg=$1
+  local level=${2:-INFO}
+  local ts
+  ts=$(date -u +"%Y-%m-%dT%H:%M:%S.%3NZ")
+  if [[ -z "$LOG_FILE" ]]; then
+    return
+  fi
+  local line
+  if (( LOG_JSON )); then
+    # Emit JSON line
+    line=$(printf '{"ts":"%s","lvl":"%s","user":"%s","email":"%s","commit":"%s","msg":%q}\n'           "$ts" "$level" "$GIT_USER" "$GIT_EMAIL" "$GIT_COMMIT" "$msg")
+  else
+    # gh‑job‑log style: timestamp  level  message
+    line=$(printf '%s %8s %s\n' "$ts" "$level" "$msg")
+  fi
+  if have flock; then
+    (
+      flock -n 200 || exit 0
+      printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null
+    ) 200>"$LOG_LOCK_FILE"
+  else
+    # Best‑effort if flock missing
+    printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null
+  fi
+}
+# --------------------------------------------------------------------
+# -------------- Unified finalisation & trap handling -----------
+finalise() {
+  local caller_line=$1 caller_sig=$2
+  (( FIN_LOGGED )) && return
+  FIN_LOGGED=1
+
+  # Preserve original exit status
+  local original_ec=$EXIT_CODE
+  EXIT_CODE=${EXIT_CODE:-$?}
+
+  # Kill active pgid (if any)
+  [[ -n $ACTIVE_PGID ]] && kill -TERM -"$ACTIVE_PGID" 2>/dev/null || true
+  sleep_short "${SLEEP_DELAY:-0.2}"
+
+  # Run cleanup
+  cleanup
+
+  # Footer logging
+  log_event "FINALISE exit_code=$EXIT_CODE line=$caller_line signal=$caller_sig reason=$EXIT_REASON" "FINAL"
+}
+
+trap 'EXIT_CODE=$?; EXIT_REASON=error;  finalise $LINENO ERR;  exit "$EXIT_CODE"' ERR
+trap 'EXIT_CODE=$?; EXIT_REASON=sigint; finalise $LINENO INT;  exit "$EXIT_CODE"' INT
+trap 'EXIT_CODE=$?; EXIT_REASON=sigterm;finalise $LINENO TERM; exit "$EXIT_CODE"' TERM
+trap 'EXIT_CODE=$?;                     finalise $LINENO EXIT; exit "$EXIT_CODE"' EXIT
+trap 'EXIT_CODE=$?; EXIT_REASON=sighup;  finalise $LINENO HUP;  exit "$EXIT_CODE"' HUP
+trap 'EXIT_CODE=$?; EXIT_REASON=sigquit; finalise $LINENO QUIT; exit "$EXIT_CODE"' QUIT
+trap 'EXIT_CODE=$?; EXIT_REASON=sigpipe; finalise $LINENO PIPE; exit "$EXIT_CODE"' PIPE
+trap 'EXIT_CODE=$?; EXIT_REASON=sigalrm; finalise $LINENO ALRM; exit "$EXIT_CODE"' ALRM
+# ---------------------------------------------------------------
+
+
 WAIT_ALL_PID=$$
 WAIT_ALL_PPID=$PPID
 # Get our process group ID safely
@@ -402,42 +501,11 @@ cleanup() {
 }
 
 # Enhanced error handler
-error_handler() {
-  local line=$1
-  local exit_code=$?
+# (error_handler removed as part of trap unification)
 
-  # Disable traps to prevent recursion
-  trap - ERR EXIT INT TERM
-
-  # Log the error
-  if [[ -n "${LOG_FILE:-}" ]]; then
-    {
-      echo "=== ERROR at line $line (exit code: $exit_code) ==="
-      echo "Time: $(date -u +"%F %T UTC")"
-      echo "Command: ${BASH_COMMAND:-unknown}"
-      echo "Active PIDs: ${SPAWNED_PIDS[*]:-none}"
-      echo "Active PGIDs: ${SPAWNED_PGIDS[*]:-none}"
-      echo "================================================================"
-    } >>"$LOG_FILE" 2>&1 || true
-  fi
-
-  # Print to stderr
-  printf '%s: ERROR at line %d (exit code: %d)\n' "$SCRIPT_NAME" "$line" "$exit_code" >&2
-
-  # ALWAYS cleanup before exit
-  cleanup
-
-  # Force exit
-  exit "$exit_code"
-}
 
 # Set up signal handlers to ensure cleanup
 # Ensure cleanup preserves exit code
-trap 'EC=$?; cleanup; exit $EC' EXIT
-trap 'error_handler $LINENO' ERR
-trap 'echo "Interrupted!" >&2; cleanup; exit 130' INT
-trap 'echo "Terminated!" >&2; cleanup; exit 143' TERM
-
 # ───────────────────────── Helpers: validation ───────────────────────────
 have()            { command -v "$1" >/dev/null 2>&1; }
 is_integer()      { [[ ${1:-x} =~ ^[0-9]+$ ]]; }
@@ -549,6 +617,7 @@ while (( $# )); do
                is_integer "$1" || die "--retry must be integer"
                RETRY_MAX=$1 ;;
     --help)    usage; exit 0 ;;
+    --version) echo "$SCRIPT_NAME v$VERSION"; exit 0 ;;
     --)        shift; CMD=("$@"); break ;;
     --*)       die "unknown option: $1" ;;
     *)         LEGACY_CMD_STRING=$1; break ;;
@@ -726,6 +795,7 @@ run_once() {
           # Track the process group (unless it's our own)
           if [[ "$pgid" != "$WAIT_ALL_PGID" ]]; then
             SPAWNED_PGIDS+=("$pgid")
+          log_event "SPAWN pid=$main_pid pgid=$pgid cmd=${RUN[*]}" "SPAWN"
           fi
 
           # IMMEDIATELY scan for child processes
@@ -850,6 +920,7 @@ run_once() {
               local sys
               sys=$(sys_mem)
               printf '%s %s %s %s\n' "$(epoch_s)" "$pid" "$rss" "$sys" >>"$mem_snap"
+              log_event "MEM ts=$(epoch_s) pid=$pid rss=$rss sys=$sys nproc=$(pgrep -g $pgid | wc -l)" "MEM"
             fi
           fi
         done <"$ps_temp"
@@ -877,6 +948,7 @@ run_once() {
   set +e
   wait "$main_pid" 2>/dev/null
   local child_rc=$?
+  log_event "EXIT pid=$main_pid rc=$child_rc cmd=${RUN[*]}" "EXIT"
   set -e
 
   # Wait for all processes in group to exit
@@ -1008,9 +1080,3 @@ else
   [[ -n $final_err ]] && printf '%s' "$final_err" >&2
 fi
 exit "$final_rc"
-
-
-
-
-
-

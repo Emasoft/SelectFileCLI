@@ -5,10 +5,10 @@
 import tempfile
 import shutil
 from pathlib import Path
-from selectfilecli import select_file
+from selectfilecli import select_file  # type: ignore[import-not-found]
 
 
-def create_test_dirs():
+def create_test_dirs() -> Path:
     """Create test directory structure."""
     temp_dir = tempfile.mkdtemp(prefix="test_nav_loading_")
 
@@ -28,10 +28,10 @@ def create_test_dirs():
         sub.mkdir()
         (sub / "nested_file.txt").write_text("Nested content")
 
-    return temp_dir
+    return Path(temp_dir)
 
 
-def main():
+def main() -> None:
     """Test navigation loading."""
     temp_dir = create_test_dirs()
 
