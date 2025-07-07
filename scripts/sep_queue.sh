@@ -9,6 +9,10 @@
 # 4. All commands execute in exact order of addition
 #
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# v8.5.1:
+# - Fixed race condition in queue_start() that allowed multiple instances
+# - Now uses atomic mkdir lock for RUNNING_FILE to prevent concurrent starts
+# - Added cleanup of lock directory in all places where RUNNING_FILE is removed
 # v8.5.0:
 # - Added runner enforcement by default (use --dont_enforce_runners to disable)
 # - Added --only_verified flag to skip unrecognized commands
@@ -43,7 +47,7 @@
 #
 set -euo pipefail
 
-VERSION='8.5.0'
+VERSION='8.5.1'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -65,7 +69,7 @@ readonly DEFAULT_PIPELINE_TIMEOUT=86400
 # Display help message
 show_help() {
     cat << 'EOF'
-sep_queue.sh v8.5.0 - Sequential Execution Pipeline Queue Manager
+sep_queue.sh v8.5.1 - Sequential Execution Pipeline Queue Manager
 
 USAGE:
     sep_queue.sh [OPTIONS] -- COMMAND [ARGS...]
@@ -225,6 +229,7 @@ queue_status() {
             echo "Status: RUNNING (PID: $runner_pid)"
         else
             rm -f "$RUNNING_FILE"
+            rmdir "${RUNNING_FILE}.lock" 2>/dev/null || true
             echo "Status: STOPPED"
         fi
     elif [[ -f "$PAUSE_FILE" ]]; then
@@ -386,21 +391,30 @@ queue_start() {
         return 1
     fi
 
-    # Check if already running
-    if [[ -f "$RUNNING_FILE" ]]; then
+    # Check if already running - using atomic lock directory instead of plain file
+    local running_lock="${RUNNING_FILE}.lock"
+    if [[ -d "$running_lock" ]]; then
         local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
         if [[ $runner_pid -gt 0 ]] && kill -0 "$runner_pid" 2>/dev/null; then
             echo "Queue is already running (PID: $runner_pid)"
             return 1
         else
+            # Stale lock, clean it up
             rm -f "$RUNNING_FILE"
+            rmdir "$running_lock" 2>/dev/null || true
         fi
     fi
 
-    # Allow starting empty queue - it will wait for commands
+    # Try to acquire the running lock atomically
+    if ! mkdir "$running_lock" 2>/dev/null; then
+        echo "Failed to acquire queue runner lock - another instance may be starting"
+        return 1
+    fi
+
+    # Now we have the lock, write our PID
+    echo $$ > "$RUNNING_FILE"
 
     echo "Starting queue processing..."
-    echo $$ > "$RUNNING_FILE"
 
     # Generate run ID
     local run_id=$(date '+%Y%m%d_%H%M%S')
@@ -454,6 +468,7 @@ EOF
     local exit_code=$?
 
     rm -f "$RUNNING_FILE"
+    rmdir "${RUNNING_FILE}.lock" 2>/dev/null || true
 
     # Record run end
     local run_end=$(date '+%Y-%m-%d %H:%M:%S')
@@ -572,6 +587,7 @@ queue_stop() {
             fi
         fi
         rm -f "$RUNNING_FILE"
+        rmdir "${RUNNING_FILE}.lock" 2>/dev/null || true
     fi
 
     # DO NOT kill sep.sh processes - they manage themselves
@@ -2189,6 +2205,7 @@ cleanup() {
         local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
         if [[ $runner_pid -eq $$ ]]; then
             rm -f "$RUNNING_FILE"
+            rmdir "${RUNNING_FILE}.lock" 2>/dev/null || true
         fi
     fi
 
