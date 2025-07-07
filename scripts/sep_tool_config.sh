@@ -12,18 +12,23 @@
 #
 
 # Supported runners (SEP is uv-centric, these are the only allowed runners)
-readonly SUPPORTED_RUNNERS=(
-    "uv"      # UV - primary Python package manager
-    "pipx"    # Python application installer
-    "pnpm"    # Node.js package manager
-    "go"      # Go language runner
-    "npx"     # Node.js package executor
-)
+# Check if already defined to avoid readonly redefinition errors
+if [[ -z "${SUPPORTED_RUNNERS+x}" ]]; then
+    readonly SUPPORTED_RUNNERS=(
+        "uv"      # UV - primary Python package manager
+        "pipx"    # Python application installer
+        "pnpm"    # Node.js package manager
+        "go"      # Go language runner
+        "npx"     # Node.js package executor
+    )
+fi
 
 # Tool to runner mappings (enforced by default)
-declare -A TOOL_RUNNER_MAPPING=(
-    # Python tools - use uv by default
-    ["ruff"]="uv run"
+# Check if already defined to avoid redeclaration errors
+if [[ -z "${TOOL_RUNNER_MAPPING+x}" ]]; then
+    declare -gA TOOL_RUNNER_MAPPING=(
+        # Python tools - use uv by default
+        ["ruff"]="uv run"
     ["mypy"]="uv run"
     ["pytest"]="uv run"
     ["pytest-cov"]="uv run"
@@ -64,10 +69,13 @@ declare -A TOOL_RUNNER_MAPPING=(
     ["bfg"]=""
     ["trufflehog"]=""
     ["sqlfluff"]=""
-)
+    )
+fi
 
 # Second-tier tools (less trusted, enabled with --enable-second-tier)
-declare -A SECOND_TIER_TOOLS=(
+# Check if already defined to avoid redeclaration errors
+if [[ -z "${SECOND_TIER_TOOLS+x}" ]]; then
+    declare -gA SECOND_TIER_TOOLS=(
     # Python testing
     ["unittest"]="uv run"
     ["nose2"]="uv run"
@@ -99,10 +107,13 @@ declare -A SECOND_TIER_TOOLS=(
     ["ward"]="uv run"
     ["behave"]="uv run"
     ["locust"]="uv run"
-)
+    )
+fi
 
 # Tool ignore file configurations
-declare -A TOOL_IGNORE_FILES=(
+# Check if already defined to avoid redeclaration errors
+if [[ -z "${TOOL_IGNORE_FILES+x}" ]]; then
+    declare -gA TOOL_IGNORE_FILES=(
     # Python tools
     ["ruff"]=".ruffignore:.gitignore"
     ["mypy"]=".mypy.ini:mypy.ini:pyproject.toml:.gitignore"
@@ -159,10 +170,13 @@ declare -A TOOL_IGNORE_FILES=(
     ["ward"]="pyproject.toml:.gitignore"
     ["behave"]=".behaverc:behave.ini:.gitignore"
     ["locust"]="locust.conf:pyproject.toml:.gitignore"
-)
+    )
+fi
 
 # Tool-specific ignore patterns (in addition to ignore files)
-declare -A TOOL_BUILTIN_IGNORES=(
+# Check if already defined to avoid redeclaration errors
+if [[ -z "${TOOL_BUILTIN_IGNORES+x}" ]]; then
+    declare -gA TOOL_BUILTIN_IGNORES=(
     ["ruff"]="__pycache__:*.pyc:.venv:venv:env:.git:.pytest_cache:.mypy_cache:.ruff_cache"
     ["mypy"]="__pycache__:*.pyc:.venv:venv:env:.git:.pytest_cache:.mypy_cache"
     ["pytest"]="__pycache__:*.pyc:.venv:venv:env:.git:.pytest_cache:build:dist"
@@ -171,10 +185,13 @@ declare -A TOOL_BUILTIN_IGNORES=(
     ["yamllint"]=".git:node_modules:vendor"
     ["shellcheck"]=".git"
     ["*"]=".git:.svn:.hg"
-)
+    )
+fi
 
 # Tool command patterns for detection
-declare -A TOOL_PATTERNS=(
+# Check if already defined to avoid redeclaration errors
+if [[ -z "${TOOL_PATTERNS+x}" ]]; then
+    declare -gA TOOL_PATTERNS=(
     # Direct tool invocations
     ["ruff"]="^ruff( |$)"
     ["mypy"]="^mypy( |$)"
@@ -209,7 +226,8 @@ declare -A TOOL_PATTERNS=(
     ["uv"]="^uv( |$)"
     ["npx"]="^npx( |$)"
     ["pnpm"]="^pnpm( |$)"
-)
+    )
+fi
 
 # Parse gitignore-style file
 parse_gitignore_file() {
@@ -306,14 +324,30 @@ get_tool_ignore_patterns() {
     local project_root="${2:-.}"
     local all_patterns=()
 
-    # Get builtin ignores
-    local builtin="${TOOL_BUILTIN_IGNORES[$tool]:-${TOOL_BUILTIN_IGNORES['*']}}"
-    IFS=':' read -ra builtin_array <<< "$builtin"
-    all_patterns+=("${builtin_array[@]}")
+    # Get builtin ignores (safely handle missing keys)
+    local builtin=""
+    if [[ -n "${TOOL_BUILTIN_IGNORES[$tool]+x}" ]]; then
+        builtin="${TOOL_BUILTIN_IGNORES[$tool]}"
+    elif [[ -n "${TOOL_BUILTIN_IGNORES['*']+x}" ]]; then
+        builtin="${TOOL_BUILTIN_IGNORES['*']}"
+    fi
+    if [[ -n "$builtin" ]]; then
+        IFS=':' read -ra builtin_array <<< "$builtin"
+        all_patterns+=("${builtin_array[@]}")
+    fi
 
-    # Get ignore files for this tool
-    local ignore_files="${TOOL_IGNORE_FILES[$tool]:-${TOOL_IGNORE_FILES['*']}}"
-    IFS=':' read -ra files_array <<< "$ignore_files"
+    # Get ignore files for this tool (safely handle missing keys)
+    local ignore_files=""
+    if [[ -n "${TOOL_IGNORE_FILES[$tool]+x}" ]]; then
+        ignore_files="${TOOL_IGNORE_FILES[$tool]}"
+    elif [[ -n "${TOOL_IGNORE_FILES['*']+x}" ]]; then
+        ignore_files="${TOOL_IGNORE_FILES['*']}"
+    fi
+
+    local files_array=()
+    if [[ -n "$ignore_files" ]]; then
+        IFS=':' read -ra files_array <<< "$ignore_files"
+    fi
 
     # Parse each ignore file
     for ignore_file in "${files_array[@]}"; do
@@ -686,14 +720,14 @@ get_tool_runner() {
     local tool="$1"
     local enable_second_tier="${2:-0}"
 
-    # Check primary tools first
-    if [[ -n "${TOOL_RUNNER_MAPPING[$tool]}" ]]; then
+    # Check primary tools first (safely handle missing keys)
+    if [[ -n "${TOOL_RUNNER_MAPPING[$tool]+x}" ]]; then
         echo "${TOOL_RUNNER_MAPPING[$tool]}"
         return 0
     fi
 
-    # Check second-tier tools if enabled
-    if [[ "$enable_second_tier" -eq 1 ]] && [[ -n "${SECOND_TIER_TOOLS[$tool]}" ]]; then
+    # Check second-tier tools if enabled (safely handle missing keys)
+    if [[ "$enable_second_tier" -eq 1 ]] && [[ -n "${SECOND_TIER_TOOLS[$tool]+x}" ]]; then
         echo "${SECOND_TIER_TOOLS[$tool]}"
         return 0
     fi
@@ -707,12 +741,12 @@ is_recognized_tool() {
     local tool="$1"
     local enable_second_tier="${2:-0}"
 
-    # Check primary tools
-    [[ -n "${TOOL_RUNNER_MAPPING[$tool]}" ]] && return 0
+    # Check primary tools (safely handle missing keys)
+    [[ -n "${TOOL_RUNNER_MAPPING[$tool]+x}" ]] && return 0
 
-    # Check second-tier tools if enabled
+    # Check second-tier tools if enabled (safely handle missing keys)
     if [[ "$enable_second_tier" -eq 1 ]]; then
-        [[ -n "${SECOND_TIER_TOOLS[$tool]}" ]] && return 0
+        [[ -n "${SECOND_TIER_TOOLS[$tool]+x}" ]] && return 0
     fi
 
     return 1

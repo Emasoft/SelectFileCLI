@@ -2207,9 +2207,11 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
             enforced_cmd=()
             if mapfile -t enforced_cmd < <(enforce_runner "$COMMAND" "${ARGS[@]}"); then
                 # Successfully enforced or no enforcement needed
-                COMMAND="${enforced_cmd[0]}"
-                ARGS=("${enforced_cmd[@]:1}")
-                log INFO "Command after runner enforcement: $COMMAND ${ARGS[*]}"
+                if [[ ${#enforced_cmd[@]} -gt 0 ]]; then
+                    COMMAND="${enforced_cmd[0]}"
+                    ARGS=("${enforced_cmd[@]:1}")
+                    log INFO "Command after runner enforcement: $COMMAND ${ARGS[*]}"
+                fi
             else
                 enforce_result=$?
                 if [[ $enforce_result -eq 2 ]]; then
