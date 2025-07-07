@@ -65,7 +65,7 @@ readonly DEFAULT_PIPELINE_TIMEOUT=86400
 # Display help message
 show_help() {
     cat << 'EOF'
-sep_queue.sh v8.4.0 - Sequential Execution Pipeline Queue Manager
+sep_queue.sh v8.5.0 - Sequential Execution Pipeline Queue Manager
 
 USAGE:
     sep_queue.sh [OPTIONS] -- COMMAND [ARGS...]
