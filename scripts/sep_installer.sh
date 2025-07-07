@@ -8,11 +8,6 @@
 # - Added flock to optional dependencies check in doctor command
 # - Removed references to deprecated install-deps.sh
 #
-# This script consolidates:
-# - ensure-sequential.sh (setup verification)
-# - test-bash-compatibility.sh (compatibility testing)
-# - dependency management functionality
-#
 # SEP is uv-centric - requires uv for Python package management
 #
 # Usage:
