@@ -12,82 +12,27 @@ VERSION='8.4.0'
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# Source the comprehensive tool configuration
+if [[ -f "$SCRIPT_DIR/sep_tool_config.sh" ]]; then
+    # shellcheck source=sep_tool_config.sh
+    source "$SCRIPT_DIR/sep_tool_config.sh"
+else
+    echo "ERROR: sep_tool_config.sh not found in $SCRIPT_DIR" >&2
+    exit 1
+fi
+
 # Get file extensions for a given tool
 get_tool_extensions() {
     local tool="$1"
-
-    case "$tool" in
-        # Python tools
-        ruff|mypy|pytest|pytest-cov|pytest-watcher|pytest-asyncio|\
-        pytest-sugar|pytest-mock|coverage|docformatter|nbqa|isort|\
-        pyupgrade|hypothesis)
-            echo "*.py *.pyi"
-            ;;
-
-        # JavaScript/TypeScript tools
-        eslint|prettier|pnpm)
-            echo "*.js *.jsx *.ts *.tsx *.mjs *.cjs"
-            ;;
-
-        # YAML tools
-        yamllint|yamlfmt)
-            echo "*.yml *.yaml"
-            ;;
-
-        # JSON tools
-        jq|jsonlint)
-            echo "*.json"
-            ;;
-
-        # GitHub Actions
-        actionlint)
-            echo "*.yml *.yaml"
-            ;;
-
-        # Shell script tools
-        shellcheck)
-            echo "*.sh *.bash"
-            ;;
-
-        # SQL tools
-        sqlfluff)
-            echo "*.sql"
-            ;;
-
-        # Documentation tools
-        mkdocs)
-            echo "*.md *.markdown"
-            ;;
-
-        # Generic tools that work on any file
-        trufflehog|pre-commit|bfg)
-            echo "*"
-            ;;
-
-        *)
-            echo "*"
-            ;;
-    esac
+    # Use the extended configuration
+    get_extended_tool_extensions "$tool"
 }
 
 # Check if a tool supports multiple files
 supports_multiple_files() {
     local tool="$1"
-
-    case "$tool" in
-        # Tools that support multiple files
-        ruff|eslint|prettier|shellcheck|yamllint)
-            return 0
-            ;;
-        # Tools that require one file at a time
-        mypy|pytest|jq|actionlint|yamlfmt)
-            return 1
-            ;;
-        *)
-            # Default to single file for safety
-            return 1
-            ;;
-    esac
+    # Use the extended configuration
+    extended_supports_multiple_files "$tool"
 }
 
 # Check if a tool requires special atomization
@@ -160,24 +105,46 @@ get_file_arg_position() {
 # Parse command and extract tool info
 parse_command() {
     local cmd_array=("$@")
+    local runner_info
+    runner_info=$(detect_runner "${cmd_array[@]}")
+
+    local runner=$(echo "$runner_info" | cut -d'|' -f1)
+    local runner_end_idx=$(echo "$runner_info" | cut -d'|' -f2)
+    local actual_tool=$(echo "$runner_info" | cut -d'|' -f3)
+
     local tool=""
     local subcommand=""
-    local actual_tool=""
 
-    # Handle uv run/tool run specially
-    if [[ "${cmd_array[0]}" == "uv" ]]; then
-        tool="uv"
-        if [[ "${#cmd_array[@]}" -gt 1 ]]; then
-            subcommand="${cmd_array[1]}"
-            if [[ "$subcommand" == "run" ]] && [[ "${#cmd_array[@]}" -gt 2 ]]; then
-                actual_tool="${cmd_array[2]}"
-            elif [[ "$subcommand" == "tool" ]] && [[ "${#cmd_array[@]}" -gt 3 ]] && [[ "${cmd_array[2]}" == "run" ]]; then
-                actual_tool="${cmd_array[3]}"
-                subcommand="tool"
-            fi
-        fi
+    if [[ -n "$runner" ]]; then
+        tool="$runner"
+        # Extract subcommand if applicable
+        case "$runner" in
+            uv)
+                [[ "${#cmd_array[@]}" -gt 1 ]] && subcommand="${cmd_array[1]}"
+                ;;
+            pnpm)
+                [[ "${#cmd_array[@]}" -gt 1 ]] && [[ "${cmd_array[1]}" =~ ^(run|exec)$ ]] && subcommand="${cmd_array[1]}"
+                ;;
+        esac
     else
         tool="${cmd_array[0]}"
+        # Check for tool subcommands
+        if [[ "${#cmd_array[@]}" -gt 1 ]]; then
+            case "$tool" in
+                ruff)
+                    [[ "${cmd_array[1]}" =~ ^(check|format)$ ]] && subcommand="${cmd_array[1]}"
+                    ;;
+                gh)
+                    [[ "${cmd_array[1]}" =~ ^(repo|pr|issue|release|api)$ ]] && subcommand="${cmd_array[1]}"
+                    ;;
+                coverage)
+                    [[ "${cmd_array[1]}" =~ ^(run|report|html|xml)$ ]] && subcommand="${cmd_array[1]}"
+                    ;;
+                commitizen|cz)
+                    [[ "${cmd_array[1]}" =~ ^(check|bump|changelog)$ ]] && subcommand="${cmd_array[1]}"
+                    ;;
+            esac
+        fi
     fi
 
     echo "$tool|$subcommand|$actual_tool"
@@ -272,9 +239,29 @@ expand_path() {
         echo "$path"
     elif [[ -d "$path" ]]; then
         # Directory - expand based on extensions
+        # Common directories to exclude
+        local common_excludes=(
+            -path '*/\.*' -o
+            -path '*/__pycache__/*' -o
+            -path '*/\.venv/*' -o
+            -path '*/venv/*' -o
+            -path '*/env/*' -o
+            -path '*/node_modules/*' -o
+            -path '*/\.git/*' -o
+            -path '*/\.pytest_cache/*' -o
+            -path '*/\.mypy_cache/*' -o
+            -path '*/\.ruff_cache/*' -o
+            -path '*/build/*' -o
+            -path '*/dist/*' -o
+            -path '*/.tox/*' -o
+            -path '*/.eggs/*' -o
+            -path '*/htmlcov/*' -o
+            -path '*/.coverage/*'
+        )
+
         if [[ "$extensions" == "*" ]]; then
             # All files
-            find "$path" -type f ! -path '*/\.*' -print
+            find "$path" -type f ! \( "${common_excludes[@]}" \) -print
         else
             # Specific extensions - use array to prevent globbing
             local ext_array=()
@@ -290,14 +277,20 @@ expand_path() {
             unset 'find_args[-1]'
 
             # Execute find with proper quoting
-            find "$path" -type f \( "${find_args[@]}" \) ! -path '*/\.*' -print
+            find "$path" -type f \( "${find_args[@]}" \) ! \( "${common_excludes[@]}" \) -print
         fi
     else
         # Might be a glob pattern
         local expanded
         expanded=($(compgen -G "$path" 2>/dev/null || true))
         if [[ ${#expanded[@]} -gt 0 ]]; then
-            printf '%s\n' "${expanded[@]}"
+            # Filter out common excluded patterns
+            for file in "${expanded[@]}"; do
+                # Skip if file is in an excluded directory
+                if [[ ! "$file" =~ /(\.venv|venv|env|__pycache__|node_modules|\.git|\.pytest_cache|\.mypy_cache|build|dist)/ ]]; then
+                    echo "$file"
+                fi
+            done
         fi
     fi
 }
@@ -653,9 +646,14 @@ generate_atomic_commands() {
     local subcommand=$(echo "$tool_info" | cut -d'|' -f2)
     local actual_tool=$(echo "$tool_info" | cut -d'|' -f3)
 
+    # Get project root (assuming we're in a git repo or use current directory)
+    local project_root
+    project_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
     # Debug output
     if [[ "${DEBUG:-0}" -eq 1 ]]; then
         echo "DEBUG: tool=$tool, subcommand=$subcommand, actual_tool=$actual_tool" >&2
+        echo "DEBUG: project_root=$project_root" >&2
     fi
 
     # Determine which tool to check for extensions
@@ -664,11 +662,21 @@ generate_atomic_commands() {
         check_tool="$actual_tool"
     fi
 
+    # Get atomization rules
+    local atomization_rule
+    atomization_rule=$(get_tool_atomization_rules "$check_tool")
+
+    # Handle tools that shouldn't be atomized
+    if [[ "$atomization_rule" == "no-atomize" ]]; then
+        echo "ATOMIC:${original_cmd[*]}"
+        return
+    fi
+
     # Check if tool requires special atomization
     if requires_special_atomization "$check_tool"; then
         # Special handling for specific tools
         case "$check_tool" in
-            pytest)
+            pytest*)
                 generate_pytest_atomic_commands "${original_cmd[@]}"
                 return $?
                 ;;
@@ -684,6 +692,7 @@ generate_atomic_commands() {
     # Debug output
     if [[ "${DEBUG:-0}" -eq 1 ]]; then
         echo "DEBUG: check_tool=$check_tool, extensions=$extensions, position=$position" >&2
+        echo "DEBUG: atomization_rule=$atomization_rule" >&2
     fi
 
     # Find file arguments
@@ -727,13 +736,105 @@ generate_atomic_commands() {
         fi
     done
 
+    # Filter files based on ignore patterns
+    if [[ ${#unique_files[@]} -gt 0 ]]; then
+        mapfile -t unique_files < <(filter_files_by_ignores "$check_tool" "$project_root" "${unique_files[@]}")
+
+        if [[ "${DEBUG:-0}" -eq 1 ]]; then
+            echo "DEBUG: After filtering ignores: ${#unique_files[@]} files remain" >&2
+        fi
+    fi
+
     if [[ ${#unique_files[@]} -eq 0 ]]; then
-        # No files found after expansion
+        # No files found after expansion and filtering
         echo "ATOMIC:${original_cmd[*]}"
         return
     fi
 
-    # Generate atomic commands
+    # Handle directory-level atomization
+    if [[ "$atomization_rule" == "directory" ]]; then
+        # Group files by directory
+        declare -A dirs
+        for file in "${unique_files[@]}"; do
+            local dir=$(dirname "$file")
+            dirs["$dir"]=1
+        done
+
+        # Generate commands for each directory
+        for dir in "${!dirs[@]}"; do
+            local atomic_cmd=()
+            for ((i=0; i<${#original_cmd[@]}; i++)); do
+                local arg="${original_cmd[$i]}"
+                local is_file_arg=0
+
+                for file_arg in "${file_args[@]}"; do
+                    if [[ "$arg" == "$file_arg" ]]; then
+                        is_file_arg=1
+                        break
+                    fi
+                done
+
+                if [[ $is_file_arg -eq 1 ]]; then
+                    # Replace with directory
+                    if [[ $i -eq $((${#original_cmd[@]}-1)) ]] || [[ "${original_cmd[$((i+1))]}" == -* ]]; then
+                        atomic_cmd+=("$dir")
+                    fi
+                else
+                    atomic_cmd+=("$arg")
+                fi
+            done
+
+            # Ensure directory is added
+            local has_dir=0
+            for cmd_part in "${atomic_cmd[@]}"; do
+                if [[ "$cmd_part" == "$dir" ]]; then
+                    has_dir=1
+                    break
+                fi
+            done
+
+            [[ $has_dir -eq 0 ]] && atomic_cmd+=("$dir")
+            echo "ATOMIC:${atomic_cmd[*]}"
+        done
+        return
+    fi
+
+    # Check if tool supports multiple files
+    if supports_multiple_files "$check_tool" && [[ ${#unique_files[@]} -gt 1 ]]; then
+        # Tool supports multiple files, output single command with all files
+        local atomic_cmd=()
+        local replaced_files=0
+
+        for ((i=0; i<${#original_cmd[@]}; i++)); do
+            local arg="${original_cmd[$i]}"
+            local is_file_arg=0
+
+            for file_arg in "${file_args[@]}"; do
+                if [[ "$arg" == "$file_arg" ]]; then
+                    is_file_arg=1
+                    break
+                fi
+            done
+
+            if [[ $is_file_arg -eq 1 ]] && [[ $replaced_files -eq 0 ]]; then
+                # Replace with all files
+                atomic_cmd+=("${unique_files[@]}")
+                replaced_files=1
+            elif [[ $is_file_arg -eq 0 ]]; then
+                atomic_cmd+=("$arg")
+            fi
+        done
+
+        # If files weren't added yet, add them now
+        if [[ $replaced_files -eq 0 ]]; then
+            atomic_cmd+=("${unique_files[@]}")
+        fi
+
+        echo "ATOMIC:${atomic_cmd[*]}"
+        return
+    fi
+
+    # Generate atomic commands for each file
     for file in "${unique_files[@]}"; do
         local atomic_cmd=()
         local skip_next=0
@@ -796,29 +897,83 @@ USAGE:
 DESCRIPTION:
     Breaks down tool commands into atomic file-level operations.
     Used internally by sep_queue.sh to process files individually.
+    Respects tool-specific ignore files and configuration.
 
 OPTIONS:
     --help, -h     Show this help message
     --version      Show version information
     --debug        Enable debug output
 
-SUPPORTED TOOLS:
-    Python: ruff, mypy, pytest, coverage, isort, black, etc.
-    JavaScript: eslint, prettier, pnpm
-    YAML: yamllint, yamlfmt, actionlint
-    Shell: shellcheck
-    Others: jq, jsonlint, make
+SUPPORTED TOOLS WITH RUNNERS:
+    uv run <tool>      Run tools via uv
+    uv tool run <tool> Run tools via uv tool
+    npx <tool>         Run Node.js tools
+    pnpm run <tool>    Run via pnpm scripts
+    pnpm exec <tool>   Execute via pnpm
+
+SUPPORTED PYTHON TOOLS:
+    ruff               Fast Python linter
+    mypy               Static type checker
+    pytest             Test framework (atomizes to individual tests)
+    pytest-cov         Coverage plugin for pytest
+    coverage           Code coverage measurement
+    black              Code formatter
+    isort              Import sorter
+    docformatter       Docstring formatter
+    nbqa               Run tools on Jupyter notebooks
+    pyupgrade          Upgrade syntax for newer Python versions
+    deptry             Dependency checker
+    hypothesis         Property-based testing
+    syrupy             Snapshot testing
+    pytest-watcher     Auto-run tests on file changes
+    pytest-asyncio     Async test support
+    pytest-sugar       Better test output
+    pytest-mock        Mock fixture for pytest
+
+SUPPORTED JAVASCRIPT/TYPESCRIPT TOOLS:
+    eslint             JavaScript/TypeScript linter
+    prettier           Code formatter
+    pnpm               Package manager
+
+SUPPORTED YAML/CONFIG TOOLS:
+    yamllint           YAML linter
+    yamlfmt            YAML formatter
+    actionlint         GitHub Actions linter
+
+SUPPORTED OTHER TOOLS:
+    shellcheck         Shell script linter
+    jq                 JSON processor
+    jsonlint           JSON validator
+    sqlfluff           SQL linter and formatter
+    mkdocs             Documentation generator
+    gh                 GitHub CLI
+    act                Run GitHub Actions locally
+    bfg                Git history cleaner
+    commitizen         Conventional commits
+    cz-conventional-gitmoji  Gitmoji commits
+    trufflehog         Secret scanner
+    pre-commit         Git hook framework
+    uv-pre-commit      Pre-commit for uv
+
+IGNORE FILE SUPPORT:
+    Each tool respects its specific ignore files:
+    - .gitignore (fallback for most tools)
+    - .ruffignore, .prettierignore, .eslintignore
+    - pyproject.toml sections for Python tools
+    - .yamllint for YAML tools
+    - Tool-specific config files
 
 EXAMPLES:
-    # Atomify ruff check command
-    sep_tool_atomifier.sh ruff check src/
-    # Output: Multiple ATOMIC: commands, one per file
+    # Atomify ruff check with runner
+    sep_tool_atomifier.sh uv run ruff check src/
 
-    # Atomify pytest command
+    # Atomify pytest (creates commands per test function)
     sep_tool_atomifier.sh pytest tests/
-    # Output: Multiple ATOMIC: commands, one per test function
 
-    # Debug mode
+    # Run with npm package
+    sep_tool_atomifier.sh npx prettier --write src/
+
+    # Debug mode to see ignore filtering
     DEBUG=1 sep_tool_atomifier.sh mypy src/
 
 OUTPUT FORMAT:
