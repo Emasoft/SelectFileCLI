@@ -380,6 +380,12 @@ parse_date_to_epoch() {
 
 # Queue management functions
 queue_start() {
+    # Check if queue is paused
+    if [[ -f "$PAUSE_FILE" ]]; then
+        echo "Queue is paused. Use --queue-resume to continue or --queue-stop to stop."
+        return 1
+    fi
+
     # Check if already running
     if [[ -f "$RUNNING_FILE" ]]; then
         local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
@@ -506,6 +512,7 @@ queue_resume() {
 
 queue_stop() {
     echo "Stopping queue and clearing all pending commands..."
+    echo "Note: Currently running sep.sh processes will continue to completion."
 
     # Create run log if run was running
     if [[ -f "$RUN_START_FILE" ]]; then
@@ -550,23 +557,31 @@ queue_stop() {
         rm -f "$CURRENT_RUN_FILE"
     fi
 
-    # Stop the runner process if running
+    # Stop the queue runner process (NOT sep.sh processes)
     if [[ -f "$RUNNING_FILE" ]]; then
         local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
         if [[ $runner_pid -gt 0 ]] && kill -0 "$runner_pid" 2>/dev/null; then
-            echo "Stopping runner process: PID $runner_pid"
-            kill "$runner_pid" 2>/dev/null || true
+            echo "Stopping queue runner: PID $runner_pid"
+            # Send TERM signal to queue runner only
+            kill -TERM "$runner_pid" 2>/dev/null || true
+            # Give it time to clean up
+            sleep 2
+            # Force kill only if still running
+            if kill -0 "$runner_pid" 2>/dev/null; then
+                kill -KILL "$runner_pid" 2>/dev/null || true
+            fi
         fi
         rm -f "$RUNNING_FILE"
     fi
 
-    # Kill current process if running
+    # DO NOT kill sep.sh processes - they manage themselves
+    # Just note if there's a running process
     if [[ -f "$CURRENT_PID_FILE" ]]; then
         local current_pid=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
         if [[ $current_pid -gt 0 ]] && kill -0 "$current_pid" 2>/dev/null; then
-            echo "Killing current process: PID $current_pid"
-            kill_process_tree "$current_pid"
+            echo "Note: sep.sh process (PID $current_pid) is still running and will complete on its own."
         fi
+        rm -f "$CURRENT_PID_FILE"
     fi
 
     # Clear queue
@@ -1690,7 +1705,9 @@ get_descendants() {
 }
 
 # Kill entire process tree including all descendants
-# Sends signal to parent and all child processes
+# WARNING: This should NEVER be used on sep.sh processes!
+# sep.sh manages its own lifecycle and cleanup.
+# This function is only for emergency cleanup of stuck processes.
 #
 # Arguments:
 #   $1 - pid: Root process ID to kill
@@ -1819,30 +1836,34 @@ check_pipeline_timeout() {
         (
             sleep "$PIPELINE_TIMEOUT"
             if [ -f "$PIPELINE_TIMEOUT_FILE" ]; then
-                log ERROR "PIPELINE TIMEOUT after ${PIPELINE_TIMEOUT}s - killing all processes"
+                log ERROR "PIPELINE TIMEOUT after ${PIPELINE_TIMEOUT}s - stopping queue"
 
-                # Kill all processes in queue
+                # Clear the queue but don't kill running processes
                 if [ -f "$QUEUE_FILE" ]; then
-                    while IFS=: read -r pid _ cmd; do
-                        if kill -0 "$pid" 2>/dev/null; then
-                            log WARN "Killing queued process PID $pid"
-                            kill_process_tree "$pid"
-                        fi
-                    done < "$QUEUE_FILE"
+                    log WARN "Clearing remaining queued commands due to timeout"
+                    > "$QUEUE_FILE"
                 fi
 
-                # Kill current process
+                # Note running sep.sh process but don't kill it
                 if [ -f "$CURRENT_PID_FILE" ]; then
                     local current
                     current=$(cat "$CURRENT_PID_FILE" 2>/dev/null || echo 0)
                     if [ "$current" -gt 0 ] && kill -0 "$current" 2>/dev/null; then
-                        log WARN "Killing current process PID $current"
-                        kill_process_tree "$current"
+                        log INFO "Note: sep.sh process PID $current is still running and will complete on its own"
                     fi
                 fi
 
-                # Clean up all locks
-                rm -rf "$LOCK_DIR"
+                # Stop the queue runner
+                if [ -f "$RUNNING_FILE" ]; then
+                    local runner_pid=$(cat "$RUNNING_FILE" 2>/dev/null || echo 0)
+                    if [ "$runner_pid" -gt 0 ] && kill -0 "$runner_pid" 2>/dev/null; then
+                        log INFO "Stopping queue runner due to timeout"
+                        kill -TERM "$runner_pid" 2>/dev/null || true
+                    fi
+                fi
+
+                # Clean up timeout file
+                rm -f "$PIPELINE_TIMEOUT_FILE"
             fi
         ) &
     else
@@ -1949,13 +1970,16 @@ EOF
     # Ensure sep.sh is available
     if [ ! -x "${SCRIPT_DIR}/sep.sh" ]; then
         log ERROR "sep.sh not found at: ${SCRIPT_DIR}/sep.sh"
-        log ERROR "This script requires sep.sh for atomic execution"
-        return 1
+        log WARN "Executing command directly without sep.sh"
+        # Fallback: execute directly
+        "$command" "${args[@]}"
+        local exit_code=$?
+    else
+        # Execute through sep.sh with job ID
+        # Note: We never kill sep.sh - it manages its own lifecycle
+        JOB_ID="$job_id" "${SCRIPT_DIR}/sep.sh" --timeout "$TIMEOUT" -- "$command" "${args[@]}"
+        local exit_code=$?
     fi
-
-    # Execute through sep.sh with job ID
-    JOB_ID="$job_id" "${SCRIPT_DIR}/sep.sh" --timeout "$TIMEOUT" -- "$command" "${args[@]}"
-    local exit_code=$?
 
     # Stop memory monitor
     if [[ -n "$monitor_pid" ]]; then
@@ -2044,6 +2068,14 @@ with open('$results_file') as f:
 process_queue() {
     local overall_exit_code=0
 
+    # Set up signal handlers for graceful shutdown
+    cleanup_process_queue() {
+        log INFO "Queue runner received shutdown signal"
+        # Don't kill sep.sh processes - they manage themselves
+        return 0
+    }
+    trap cleanup_process_queue TERM INT
+
     # Check pipeline timeout
     check_pipeline_timeout
 
@@ -2052,6 +2084,11 @@ process_queue() {
         while [[ -f "$PAUSE_FILE" ]]; do
             log INFO "Queue is paused. Waiting..."
             sleep 5
+            # Check if we should stop
+            if [[ ! -f "$RUNNING_FILE" ]]; then
+                log INFO "Queue stopped while paused"
+                return 0
+            fi
         done
 
         # Check if queue is empty
@@ -2155,6 +2192,14 @@ cleanup() {
         fi
     fi
 
+    # Update run log with final status if active
+    if [[ -f "${LOCK_DIR}/run_log" ]]; then
+        local run_log=$(cat "${LOCK_DIR}/run_log" 2>/dev/null)
+        if [[ -n "$run_log" ]] && [[ -f "$run_log" ]]; then
+            echo "Queue runner exit code: $exit_code" >> "$run_log"
+        fi
+    fi
+
     log INFO "Sequential queue exiting with code: $exit_code"
     [[ $VERBOSE -eq 1 ]] && echo "Log saved to: $EXEC_LOG" >&2
 
@@ -2165,6 +2210,27 @@ trap cleanup EXIT INT TERM
 
 # Add debug mode
 [[ "${DEBUG:-0}" -eq 1 ]] && set -x
+
+# Error handler for cleanup on unexpected exit
+error_handler() {
+    local line_no=$1
+    local exit_code=$2
+    log ERROR "Script failed at line $line_no with exit code $exit_code"
+
+    # Update run log if active
+    if [[ -f "${LOCK_DIR}/run_log" ]]; then
+        local run_log=$(cat "${LOCK_DIR}/run_log" 2>/dev/null)
+        if [[ -n "$run_log" ]] && [[ -f "$run_log" ]]; then
+            echo "ERROR: Script failed at line $line_no with exit code $exit_code" >> "$run_log"
+        fi
+    fi
+
+    # Don't interfere with sep.sh processes - they manage themselves
+    return $exit_code
+}
+
+# Set error trap
+trap 'error_handler ${LINENO} $?' ERR
 
 # Now handle queue management commands (functions are defined)
 if [[ -n "$QUEUE_COMMAND" ]]; then
@@ -2206,17 +2272,17 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
         if [[ -f "${SCRIPT_DIR}/sep_tool_config.sh" ]]; then
             source "${SCRIPT_DIR}/sep_tool_config.sh"
 
-            # Check and enforce runner
+            # Check and enforce runner with error handling
             enforced_cmd=()
-            # Capture both output and exit code (only stdout, let stderr through)
-            # Use || true to prevent exit on non-zero return due to set -e
-            enforce_output=$(enforce_runner "$COMMAND" "${ARGS[@]}" || echo "EXIT:$?")
             enforce_result=0
 
-            # Check if we got an exit code marker
-            if [[ "$enforce_output" =~ ^EXIT:([0-9]+)$ ]]; then
-                enforce_result="${BASH_REMATCH[1]}"
-                enforce_output=""
+            # Try to enforce runner, but don't fail on errors
+            if enforce_output=$(enforce_runner "$COMMAND" "${ARGS[@]}" 2>&1); then
+                enforce_result=0
+            else
+                enforce_result=$?
+                # Log the error but continue
+                log WARN "Runner enforcement failed with code $enforce_result, continuing without enforcement"
             fi
 
             if [[ $enforce_result -eq 0 ]]; then
@@ -2249,11 +2315,25 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
         # Source atomifier if available
         ATOMIFIER_SCRIPT="${SCRIPT_DIR}/sep_tool_atomifier.sh"
         if [[ -f "$ATOMIFIER_SCRIPT" ]]; then
-            source "$ATOMIFIER_SCRIPT"
+            # Try to source atomifier, but don't fail on errors
+            if ! source "$ATOMIFIER_SCRIPT" 2>/dev/null; then
+                log WARN "Failed to source atomifier, running command without atomification"
+                ATOMIFY=0
+            fi
+        else
+            log WARN "Atomifier not found, running command without atomification"
+            ATOMIFY=0
+        fi
+    fi
 
-            # Generate atomic commands
-            mapfile -t ATOMIC_COMMANDS < <(generate_atomic_commands "$COMMAND" "${ARGS[@]}" | grep "^ATOMIC:")
-
+    # Continue with atomification if still enabled
+    if [[ $ATOMIFY -eq 1 ]]; then
+        # Generate atomic commands with error handling
+        ATOMIC_COMMANDS=()
+        if ! mapfile -t ATOMIC_COMMANDS < <(generate_atomic_commands "$COMMAND" "${ARGS[@]}" 2>/dev/null | grep "^ATOMIC:" || true); then
+            log WARN "Failed to generate atomic commands, running command without atomification"
+            ATOMIFY=0
+        else
             [[ "${VERBOSE:-0}" -eq 1 ]] && echo "[SEQ-QUEUE] DEBUG: Generated ${#ATOMIC_COMMANDS[@]} atomic commands" >&2
 
             if [[ ${#ATOMIC_COMMANDS[@]} -gt 1 ]]; then
