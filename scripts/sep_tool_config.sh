@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sep_tool_config.sh - Comprehensive tool configuration for atomification
-# Version: 8.5.0
+# Version: 8.6.0
 #
 # This script contains detailed configuration for all supported tools including:
 # - Command syntax patterns
@@ -10,6 +10,22 @@
 # - Runner enforcement mappings
 # - Second-tier tool support
 #
+# CHANGELOG:
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - Added VERSION variable
+# - Added sep_common.sh sourcing
+#
+
+set -euo pipefail
+
+VERSION='8.6.0'
+
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
 
 # Supported runners (SEP is uv-centric, these are the only allowed runners)
 # Check if already defined to avoid readonly redefinition errors

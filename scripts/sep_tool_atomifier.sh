@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # sep_tool_atomifier.sh - Tool configuration and atomification logic
-# Version: 8.5.0
+# Version: 8.6.0
 #
 # This script contains the configuration and logic for atomifying commands
 # into individual file operations for sequential execution.
 #
+# CHANGELOG:
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - Added missing sep_common.sh sourcing
+#
 set -euo pipefail
 
-VERSION='8.5.0'
+VERSION='8.6.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
 
 # Source the comprehensive tool configuration
 if [[ -f "$SCRIPT_DIR/sep_tool_config.sh" ]]; then

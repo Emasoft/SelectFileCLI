@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # sep_kill_orphans.sh - Clean up orphaned processes and stale locks
-# Version: 8.4.0
+# Version: 8.6.0
 #
 # This script finds and terminates processes that have been orphaned (parent PID = 1)
 # and removes stale lock files from the sequential execution system.
+#
+# CHANGELOG:
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - Updated help text version to match actual version
 #
 # Usage: ./sep_kill_orphans.sh [--dry-run | --help]
 #
@@ -13,7 +18,7 @@
 #
 set -euo pipefail
 
-VERSION='8.5.0'
+VERSION='8.6.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -27,7 +32,7 @@ init_sep_common
 # Display help message
 show_help() {
     cat << 'EOF'
-sep_kill_orphans.sh v8.4.0 - Emergency cleanup for orphaned processes
+sep_kill_orphans.sh v8.6.0 - Emergency cleanup for orphaned processes
 
 USAGE:
     sep_kill_orphans.sh [OPTIONS]

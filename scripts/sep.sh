@@ -4,8 +4,12 @@
 #                   *automatic runner selection*.
 #
 # CHANGELOG:
+# v8.5.0:
 # - Added fallback locking mechanism using atomic mkdir for macOS compatibility
 #   when flock is not available. This prevents log corruption from concurrent writes.
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - No functional changes from v8.5.0
 #
 # -------------------------------------------------------------------------
 # USAGE
@@ -63,7 +67,7 @@
 #   124  Command killed by timeout (same as GNU timeout(1))
 #   *    Any other code is the wrapped command’s exit status
 #
-# RELEASE NOTES
+# RELEASE NOTES (v8.6.0)
 #   • A detailed, timestamped log is always written (see --log).  It includes
 #     stdout, stderr, exit status, and per-PID *peak* RSS plus system-wide
 #     memory utilisation at each peak.
@@ -133,7 +137,7 @@
 #
 # -------------------------------------------------------------------------
 
-VERSION='8.5.0'
+VERSION='8.6.0'
 
 # ───────────────────────── Strict-mode & traps ───────────────────────────
 set -Eeuo pipefail
@@ -378,7 +382,7 @@ log_event() {
     local lock_dir="${LOG_LOCK_FILE}.d"
     local max_wait=50  # 5 seconds (50 * 0.1s)
     local waited=0
-    
+
     while (( waited < max_wait )); do
       if mkdir "$lock_dir" 2>/dev/null; then
         # We got the lock, write and release
@@ -390,7 +394,7 @@ log_event() {
       sleep 0.1
       ((waited++))
     done
-    
+
     # Timeout: clean up stale lock if needed and try one more time
     if [[ -d "$lock_dir" ]]; then
       # Check if lock is stale (older than 10 seconds)
@@ -398,7 +402,7 @@ log_event() {
         rmdir "$lock_dir" 2>/dev/null || true
       fi
     fi
-    
+
     # Final attempt
     if mkdir "$lock_dir" 2>/dev/null; then
       printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null

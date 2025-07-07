@@ -1,10 +1,15 @@
 #!/usr/bin/env bash
 # sep_monitor_queue.sh - Monitor the sequential execution queue and system state
-# Version: 8.5.0
+# Version: 8.6.0
+#
+# CHANGELOG:
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - Updated help text version to match actual version
 #
 set -euo pipefail
 
-VERSION='8.5.0'
+VERSION='8.6.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,7 +23,7 @@ init_sep_common
 # Display help message
 show_help() {
     cat << 'EOF'
-sep_monitor_queue.sh v8.4.0 - Real-time sequential execution queue monitor
+sep_monitor_queue.sh v8.6.0 - Real-time sequential execution queue monitor
 
 USAGE:
     sep_monitor_queue.sh [OPTIONS]

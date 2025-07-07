@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sep_queue.sh - Sequential Execution Pipeline Queue Manager
-# Version: 8.5.0
+# Version: 8.6.0
 #
 # This version implements the correct flow:
 # 1. Commands are added to queue (atomified if possible)
@@ -9,6 +9,9 @@
 # 4. All commands execute in exact order of addition
 #
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - Consolidated all previous changes from v8.5.0 and v8.5.1
 # v8.5.1:
 # - Fixed race condition in queue_start() that allowed multiple instances
 # - Now uses atomic mkdir lock for RUNNING_FILE to prevent concurrent starts
@@ -47,7 +50,7 @@
 #
 set -euo pipefail
 
-VERSION='8.5.1'
+VERSION='8.6.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

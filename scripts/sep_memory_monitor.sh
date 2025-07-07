@@ -1,13 +1,18 @@
 #!/usr/bin/env bash
 # sep_memory_monitor.sh - Monitor and kill processes exceeding memory limits
-# Version: 8.4.0
+# Version: 8.6.0
 #
 # This script monitors all child processes of the sequential executor
 # and kills any that exceed the memory limit to prevent system lockup
 #
+# CHANGELOG:
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - No functional changes from v8.5.0
+#
 set -euo pipefail
 
-VERSION='8.5.0'
+VERSION='8.6.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

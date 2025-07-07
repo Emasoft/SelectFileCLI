@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # sep_installer.sh - Sequential Execution Pipeline Installation Manager
-# Version: 8.5.1
+# Version: 8.6.0
 #
 # CHANGELOG:
+# v8.6.0:
+# - Version bump for consistency across all SEP scripts
+# - Consolidated all previous changes from v8.5.1
 # v8.5.1:
 # - Added flock installation for Linux systems (util-linux package)
 # - Added flock to optional dependencies check in doctor command
@@ -17,7 +20,7 @@
 #
 set -euo pipefail
 
-VERSION='8.5.1'
+VERSION='8.6.0'
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -32,7 +35,7 @@ init_sep_common
 # Display help message
 show_help() {
     cat << EOF
-sep_installer.sh v8.5.1 - Sequential Execution Pipeline Installation Manager
+sep_installer.sh v8.6.0 - Sequential Execution Pipeline Installation Manager
 
 USAGE:
     $SCRIPT_NAME install    Install and configure sequential pipeline
