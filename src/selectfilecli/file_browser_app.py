@@ -474,6 +474,109 @@ class CustomDirectoryTree(DirectoryTree):
         self._venv_cache[path_str] = result
         return result
 
+    def _get_cached_dir_size(self, dir_path: Path) -> int:
+        """Get directory size from cache or return 0 if not cached.
+
+        This is used for immediate sorting while async calculation happens.
+        """
+        path_str = str(dir_path)
+        return self._dir_size_cache.get(path_str, 0)
+
+    async def _update_root_label_size(self, dir_path: Path) -> None:
+        """Asynchronously calculate and update root label with directory size."""
+        try:
+            # Calculate size in background
+            size = await self._calculate_dir_size_async(dir_path)
+
+            # Update cache
+            path_str = str(dir_path)
+            self._manage_cache(self._dir_size_cache, path_str, MAX_DIR_CACHE_SIZE)
+            self._dir_size_cache[path_str] = size
+
+            # Trigger refresh of root label
+            if self.root and not self.root.is_expanded:
+                # Just refresh the root node label
+                self.refresh()
+        except Exception:
+            pass
+
+    async def _calculate_dir_size_async(self, dir_path: Path, depth: int = 0, max_items: int = 1000) -> int:
+        """Asynchronously calculate directory size without blocking UI."""
+        # Check cache first
+        path_str = str(dir_path)
+        if path_str in self._dir_size_cache:
+            return self._dir_size_cache[path_str]
+
+        # Protect against deep recursion
+        if depth > MAX_DIRECTORY_DEPTH:
+            return 0
+
+        total_size = 0
+        items_processed = 0
+
+        try:
+            # Use asyncio to yield control periodically
+            import asyncio
+
+            for entry in dir_path.iterdir():
+                if items_processed >= max_items:
+                    break
+                items_processed += 1
+
+                # Yield control every 10 items to keep UI responsive
+                if items_processed % 10 == 0:
+                    await asyncio.sleep(0)
+
+                try:
+                    stat_info = entry.lstat()
+                    if stat.S_ISREG(stat_info.st_mode):
+                        total_size += stat_info.st_size
+                    elif stat.S_ISDIR(stat_info.st_mode):
+                        # For subdirectories, use cached value or skip
+                        sub_path_str = str(entry)
+                        if sub_path_str in self._dir_size_cache:
+                            total_size += self._dir_size_cache[sub_path_str]
+                        # Don't recurse in async version to avoid blocking
+                except (PermissionError, OSError):
+                    continue
+        except (PermissionError, OSError):
+            pass
+
+        return total_size
+
+    async def _calculate_dir_sizes_async(self, node: Any) -> None:
+        """Calculate directory sizes for all child directories asynchronously."""
+        if not hasattr(node, "_children") or not node._children:
+            return
+
+        import asyncio
+
+        # Collect directories that need size calculation
+        dirs_to_calculate = []
+        for child in node._children:
+            if child.data:
+                path = self._get_path_from_node_data(child.data)
+                if path and path.is_dir():
+                    path_str = str(path)
+                    if path_str not in self._dir_size_cache:
+                        dirs_to_calculate.append(path)
+
+        # Calculate sizes asynchronously
+        for dir_path in dirs_to_calculate:
+            try:
+                size = await self._calculate_dir_size_async(dir_path)
+                path_str = str(dir_path)
+                self._manage_cache(self._dir_size_cache, path_str, MAX_DIR_CACHE_SIZE)
+                self._dir_size_cache[path_str] = size
+
+                # Re-sort after updating cache (only if still sorting by size)
+                if self.tree_sort_mode == SortMode.SIZE:
+                    self.sort_children_by_mode(node)
+                    # Small delay to keep UI responsive
+                    await asyncio.sleep(0.01)
+            except Exception:
+                continue
+
     def _get_path_from_node_data(self, data: Any) -> Optional[Path]:
         """Extract path from node data with consistent handling."""
         try:
@@ -594,14 +697,22 @@ class CustomDirectoryTree(DirectoryTree):
             if not os.access(current_dir, os.W_OK):
                 label.append(" 🔒", style="bright_red")
 
-            # Try to get directory stats and size
+            # Try to get directory stats
             try:
                 dir_stat = current_dir.stat()
 
-                # Calculate total directory size
-                total_size = self.calculate_directory_size(current_dir)
-                size_str = self.format_file_size(total_size)
-                label.append(f"  {size_str}", style="dim cyan")
+                # For root label, use cached size if available, otherwise show placeholder
+                path_str = str(current_dir)
+                if path_str in self._dir_size_cache:
+                    size_str = self.format_file_size(self._dir_size_cache[path_str])
+                    label.append(f"  {size_str}", style="dim cyan")
+                else:
+                    # Show placeholder and calculate in background
+                    label.append("  <calculating...>", style="dim cyan italic")
+                    # Schedule async size calculation
+                    import asyncio
+
+                    asyncio.create_task(self._update_root_label_size(current_dir))
 
                 # Add modification date
                 date_str = self.format_date(dir_stat.st_mtime)
@@ -906,7 +1017,7 @@ class CustomDirectoryTree(DirectoryTree):
                     SortMode.CREATED: lambda p, s: s.st_ctime,
                     SortMode.ACCESSED: lambda p, s: s.st_atime,
                     SortMode.MODIFIED: lambda p, s: s.st_mtime,
-                    SortMode.SIZE: lambda p, s: s.st_size if p.is_file() else DEFAULT_DIR_SIZE,
+                    SortMode.SIZE: lambda p, s: s.st_size if p.is_file() else self._get_cached_dir_size(p),
                     SortMode.EXTENSION: lambda p, s: p.suffix.lower() if p.is_file() else "",
                 }
 
@@ -992,6 +1103,12 @@ class CustomDirectoryTree(DirectoryTree):
             # Apply sorting after the node is populated
             self.sort_children_by_mode(node)
 
+            # If sorting by size and directories need size calculation, do it async
+            if self.tree_sort_mode == SortMode.SIZE:
+                import asyncio
+
+                asyncio.create_task(self._calculate_dir_sizes_async(node))
+
     def _add_loading_placeholder(self, node: TreeNode[DirEntry]) -> None:
         """Add a loading placeholder to a node while its content is being loaded.
 
@@ -1055,6 +1172,13 @@ class CustomDirectoryTree(DirectoryTree):
         if content_list:
             self._calculate_column_widths(node)
 
+            # If we have many items, schedule async operations
+            if len(content_list) > 20:
+                import asyncio
+
+                # Pre-cache directory sizes in background
+                asyncio.create_task(self._precache_dir_info_async(node, content_list))
+
         # Ensure the node is expanded to show content
         if not node.is_expanded:
             node.expand()
@@ -1089,6 +1213,23 @@ class CustomDirectoryTree(DirectoryTree):
                 finally:
                     # Mark this iteration as done.
                     self._load_queue.task_done()
+
+    async def _precache_dir_info_async(self, node: Any, paths: list[Path]) -> None:
+        """Pre-cache directory information asynchronously for better performance."""
+        import asyncio
+
+        # Cache venv status and basic directory info
+        for i, path in enumerate(paths):
+            if path.is_dir():
+                # Check venv status (quick operation)
+                self.has_venv(path)
+
+                # Yield control every few items
+                if i % 5 == 0:
+                    await asyncio.sleep(0)
+
+        # Apply initial sorting once all quick info is cached
+        self.sort_children_by_mode(node)
 
 
 class FileBrowserApp(App[Optional[FileInfo]]):
