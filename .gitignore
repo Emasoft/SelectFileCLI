@@ -80,7 +80,8 @@ logs/
 .env.local
 
 # UV
-uv.lock
+# uv.lock should be committed for deterministic installs
+# uv.lock
 
 # Sequential locks (runtime data - never commit)
 .sequential-locks/
