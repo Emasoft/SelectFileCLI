@@ -1,11 +1,17 @@
 #!/usr/bin/env bash
 # sep_installer.sh - Sequential Execution Pipeline Installation Manager
-# Version: 8.5.0
+# Version: 8.5.1
+#
+# CHANGELOG:
+# v8.5.1:
+# - Added flock installation for Linux systems (util-linux package)
+# - Added flock to optional dependencies check in doctor command
+# - Removed references to deprecated install-deps.sh
 #
 # This script consolidates:
 # - ensure-sequential.sh (setup verification)
 # - test-bash-compatibility.sh (compatibility testing)
-# - install-deps.sh (dependency management)
+# - dependency management functionality
 #
 # SEP is uv-centric - requires uv for Python package management
 #
@@ -16,7 +22,7 @@
 #
 set -euo pipefail
 
-VERSION='8.5.0'
+VERSION='8.5.1'
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -31,7 +37,7 @@ init_sep_common
 # Display help message
 show_help() {
     cat << EOF
-sep_installer.sh v8.5.0 - Sequential Execution Pipeline Installation Manager
+sep_installer.sh v8.5.1 - Sequential Execution Pipeline Installation Manager
 
 USAGE:
     $SCRIPT_NAME install    Install and configure sequential pipeline
@@ -297,6 +303,20 @@ install_dependencies() {
             missing+=("$tool")
         fi
     done
+
+    # Special handling for flock
+    if ! check_command "flock"; then
+        case "$os_type" in
+            ubuntu|debian|fedora|centos)
+                # flock is in util-linux package on Linux
+                missing+=("util-linux")
+                ;;
+            macos)
+                # flock is not available on macOS, but we have a fallback
+                log_info "flock not available on macOS - sep.sh will use fallback locking"
+                ;;
+        esac
+    fi
 
     if [ ${#missing[@]} -eq 0 ]; then
         log_success "All essential dependencies installed"
@@ -681,6 +701,7 @@ doctor_check_dependencies() {
         "pre-commit:Git hooks framework"
         "rg:ripgrep (fast search)"
         "fd:Fast file finder"
+        "flock:File locking utility (sep.sh uses fallback if missing)"
     )
 
     for dep in "${optional[@]}"; do

@@ -3,6 +3,10 @@
 #                   retries, JSON/log output, per-process memory tracking, and
 #                   *automatic runner selection*.
 #
+# CHANGELOG:
+# - Added fallback locking mechanism using atomic mkdir for macOS compatibility
+#   when flock is not available. This prevents log corruption from concurrent writes.
+#
 # -------------------------------------------------------------------------
 # USAGE
 #   ./sep.sh [OPTIONS] -- <…command and args…>
@@ -370,8 +374,39 @@ log_event() {
       printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null
     ) 200>"$LOG_LOCK_FILE"
   else
-    # Best‑effort if flock missing
-    printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null
+    # Fallback: use mkdir as atomic lock when flock is not available (e.g., macOS)
+    local lock_dir="${LOG_LOCK_FILE}.d"
+    local max_wait=50  # 5 seconds (50 * 0.1s)
+    local waited=0
+    
+    while (( waited < max_wait )); do
+      if mkdir "$lock_dir" 2>/dev/null; then
+        # We got the lock, write and release
+        printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null
+        rmdir "$lock_dir" 2>/dev/null || true
+        return
+      fi
+      # Lock is held by another process, wait a bit
+      sleep 0.1
+      ((waited++))
+    done
+    
+    # Timeout: clean up stale lock if needed and try one more time
+    if [[ -d "$lock_dir" ]]; then
+      # Check if lock is stale (older than 10 seconds)
+      if [[ $(find "$lock_dir" -maxdepth 0 -mmin +0.17 2>/dev/null) ]]; then
+        rmdir "$lock_dir" 2>/dev/null || true
+      fi
+    fi
+    
+    # Final attempt
+    if mkdir "$lock_dir" 2>/dev/null; then
+      printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null
+      rmdir "$lock_dir" 2>/dev/null || true
+    else
+      # Give up and write anyway (best effort)
+      printf '%s' "$line" >>"$LOG_FILE" 2>/dev/null
+    fi
   fi
 }
 # --------------------------------------------------------------------
