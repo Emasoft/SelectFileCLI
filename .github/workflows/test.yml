@@ -21,7 +21,7 @@ jobs:
         uv sync --all-extras --dev
     - name: Run tests with coverage
       run: |
-        ./scripts/sequential_queue.sh --timeout 7200 -- uv run pytest -c pytest-ci.ini
+        ./scripts/sep_queue.sh --timeout 7200 -- uv run pytest -c pytest-ci.ini
     - name: Upload coverage reports
       uses: codecov/codecov-action@v4
       with:

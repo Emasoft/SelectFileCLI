@@ -18,8 +18,8 @@ jobs:
         uv sync --all-extras --dev
     - name: Run lint workflow
       run: |
-        ./scripts/sequential_queue.sh --timeout 3600 -- uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
-        ./scripts/sequential_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320
+        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated --output-format full
+        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320
     - name: Run tests
       run: |-
-        ./scripts/sequential_queue.sh --timeout 7200 -- uv run pytest -c pytest-ci.ini
+        ./scripts/sep_queue.sh --timeout 7200 -- uv run pytest -c pytest-ci.ini

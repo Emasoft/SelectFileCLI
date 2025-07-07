@@ -415,7 +415,7 @@ PID=$$
 STATUS=running
 PROJECT=$PROJECT_ROOT
 BRANCH=$current_branch
-WORKFLOW=sequential_queue
+WORKFLOW=sep_queue
 RUN_USER=$git_user
 COMMIT=$commit_sha
 EVENT=manual
@@ -764,7 +764,7 @@ list_runs() {
             json_array+="\"displayTitle\":\"Queue Run $RUN_ID\","
             json_array+="\"status\":\"$gh_status\","
             json_array+="\"conclusion\":\"$gh_status\","
-            json_array+="\"workflowName\":\"${WORKFLOW:-sequential_queue}\","
+            json_array+="\"workflowName\":\"${WORKFLOW:-sep_queue}\","
             json_array+="\"headBranch\":\"$BRANCH\","
             json_array+="\"headSha\":\"${COMMIT:-}\","
             json_array+="\"createdAt\":\"$created_at\","
@@ -2198,7 +2198,7 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
                 done
 
                 echo "[SEQ-QUEUE] All ${#ATOMIC_COMMANDS[@]} atomic commands added to queue"
-                echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
+                echo "[SEQ-QUEUE] Use 'sep_queue.sh --queue-start' to begin processing"
                 exit 0
             elif [[ ${#ATOMIC_COMMANDS[@]} -eq 1 ]]; then
                 # Single file - proceed with default sequence
@@ -2210,5 +2210,5 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
     # STEP 8: DEFAULT SEQUENCE - Add single command to queue
     echo "$$:$(date '+%s'):$COMMAND ${ARGS[*]}" >> "$QUEUE_FILE"
     echo "[SEQ-QUEUE] Command added to queue"
-    echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
+    echo "[SEQ-QUEUE] Use 'sep_queue.sh --queue-start' to begin processing"
 fi

@@ -12,14 +12,13 @@ from typing import Optional, List, Tuple
 
 
 def get_sequential_executor() -> Optional[Path]:
-    """Get the path to the sequential executor if available."""
-    # Try to find the sequential executor
+    """Get the path to the sequential queue executor if available."""
+    # Try to find the sequential queue executor
     project_root = Path(__file__).parent.parent
-    sequential_executor = project_root / "scripts" / "sequential-executor.sh"
-    sep = project_root / "scripts" / "sep.sh"
+    sep_queue = project_root / "scripts" / "sep_queue.sh"
 
-    if sequential_executor.exists() and sep.exists():
-        return sequential_executor
+    if sep_queue.exists():
+        return sep_queue
     return None
 
 
@@ -37,12 +36,11 @@ def run_command_sequential(cmd: List[str], cwd: Optional[Path] = None, timeout: 
         Tuple of (exit_code, stdout, stderr)
     """
     # Check if we should use sequential execution
-    sequential_executor = get_sequential_executor()
-    sep = Path(__file__).parent.parent / "scripts" / "sep.sh"
+    sep_queue = get_sequential_executor()
 
-    if use_sequential and sequential_executor and sep.exists():
-        # Use sep.sh with sequential executor
-        full_cmd = [str(sep), "--timeout", str(timeout), "--", str(sequential_executor)] + cmd
+    if use_sequential and sep_queue:
+        # Use sep_queue.sh for sequential execution
+        full_cmd = [str(sep_queue), "--timeout", str(timeout), "--"] + cmd
     else:
         # Direct execution (fallback)
         full_cmd = cmd

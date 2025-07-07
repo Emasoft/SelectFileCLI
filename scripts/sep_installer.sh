@@ -348,7 +348,7 @@ make_scripts_executable() {
     log_info "Making scripts executable..."
 
     local scripts=(
-        "sep_wait_all.sh"
+        "sep.sh"
         "sep_queue.sh"
         "sep_memory_monitor.sh"
         "sep_monitor_queue.sh"
