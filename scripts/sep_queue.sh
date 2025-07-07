@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sequential_queue.sh - Universal sequential execution queue manager
+# sep_queue.sh - Sequential Execution Pipeline Queue Manager
 # Version: 8.4.0
 #
 # This version implements the correct flow:
@@ -50,19 +50,19 @@ readonly DEFAULT_PIPELINE_TIMEOUT=86400
 # Display help message
 show_help() {
     cat << 'EOF'
-sequential_queue.sh v8.4.0 - Universal sequential execution queue
+sep_queue.sh v8.4.0 - Sequential Execution Pipeline Queue Manager
 
 USAGE:
-    sequential_queue.sh [OPTIONS] -- COMMAND [ARGS...]
-    sequential_queue.sh --queue-start
-    sequential_queue.sh --queue-status
-    sequential_queue.sh --queue-pause
-    sequential_queue.sh --queue-resume
-    sequential_queue.sh --queue-stop
-    sequential_queue.sh run list [OPTIONS]
-    sequential_queue.sh run view [RUN_ID] [OPTIONS]
-    sequential_queue.sh run watch [RUN_ID] [OPTIONS]
-    sequential_queue.sh --help
+    sep_queue.sh [OPTIONS] -- COMMAND [ARGS...]
+    sep_queue.sh --queue-start
+    sep_queue.sh --queue-status
+    sep_queue.sh --queue-pause
+    sep_queue.sh --queue-resume
+    sep_queue.sh --queue-stop
+    sep_queue.sh run list [OPTIONS]
+    sep_queue.sh run view [RUN_ID] [OPTIONS]
+    sep_queue.sh run watch [RUN_ID] [OPTIONS]
+    sep_queue.sh --help
 
 DESCRIPTION:
     Manages a sequential execution queue for commands.
@@ -128,18 +128,18 @@ ENVIRONMENT VARIABLES:
 
 WORKFLOW:
     1. Add commands to queue:
-       sequential_queue.sh -- ruff check src/
-       sequential_queue.sh -- pytest tests/
+       sep_queue.sh -- ruff check src/
+       sep_queue.sh -- pytest tests/
 
     2. View queue status:
-       sequential_queue.sh --queue-status
+       sep_queue.sh --queue-status
 
     3. Start execution:
-       sequential_queue.sh --queue-start
+       sep_queue.sh --queue-start
 
     4. Pause/Resume as needed:
-       sequential_queue.sh --queue-pause
-       sequential_queue.sh --queue-resume
+       sep_queue.sh --queue-pause
+       sep_queue.sh --queue-resume
 
 ATOMIFICATION:
     Commands are automatically broken down into atomic operations:
@@ -162,29 +162,29 @@ SPECIAL HANDLING:
 
 EXAMPLES:
     # Add commands to queue
-    sequential_queue.sh -- git add -A
-    sequential_queue.sh -- ruff format src/
-    sequential_queue.sh -- pytest tests/
-    sequential_queue.sh -- git commit -m "feat: new feature"
+    sep_queue.sh -- git add -A
+    sep_queue.sh -- ruff format src/
+    sep_queue.sh -- pytest tests/
+    sep_queue.sh -- git commit -m "feat: new feature"
 
     # Check queue
-    sequential_queue.sh --queue-status
+    sep_queue.sh --queue-status
 
     # Start processing
-    sequential_queue.sh --queue-start
+    sep_queue.sh --queue-start
 
 LOG FILES:
     Default location: ./logs (in project root)
     Can be changed with: --log-dir PATH or LOG_DIR environment variable
-    Execution logs: logs/sequential_queue_*.log
-    Memory logs: logs/memory_monitor_*.log
+    Execution logs: logs/sep_queue_*.log
+    Memory logs: logs/sep_memory_monitor_*.log
     Run logs: logs/queue_run_*.log
 
 LOCK FILES:
-    Lock directory: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/
-    Queue file: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/queue.txt
-    Pause file: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/paused
-    Running file: PROJECT_ROOT/.sequential-locks/seq-exec-PROJECT_HASH/running
+    Lock directory: PROJECT_ROOT/.sequential-locks/sep-exec-PROJECT_HASH/
+    Queue file: PROJECT_ROOT/.sequential-locks/sep-exec-PROJECT_HASH/queue.txt
+    Pause file: PROJECT_ROOT/.sequential-locks/sep-exec-PROJECT_HASH/paused
+    Running file: PROJECT_ROOT/.sequential-locks/sep-exec-PROJECT_HASH/running
 
 EOF
     exit 0
@@ -1280,7 +1280,7 @@ while [[ $# -gt 0 ]]; do
             show_help
             ;;
         --version)
-            echo "sequential_queue.sh v$VERSION"
+            echo "sep_queue.sh v$VERSION"
             exit 0
             ;;
         --timeout)
@@ -1530,7 +1530,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Lock and state files - simple relative paths
 LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-./.sequential-locks}"
-LOCK_DIR="${LOCK_BASE_DIR}/seq-exec-${PROJECT_HASH}"
+LOCK_DIR="${LOCK_BASE_DIR}/sep-exec-${PROJECT_HASH}"
 LOCKFILE="${LOCK_DIR}/executor.lock"
 # Source .env.development if it exists
 if [ -f "${PROJECT_ROOT}/.env.development" ]; then
@@ -1563,7 +1563,7 @@ CURRENT_RUN_FILE="${LOCK_DIR}/current_run"
 # Ensure lock directory exists
 mkdir -p "$LOCK_DIR"
 mkdir -p "$RUNS_DIR"
-EXEC_LOG="${LOGS_DIR}/sequential_queue_$(date '+%Y%m%d_%H%M%S')_$$.log"
+EXEC_LOG="${LOGS_DIR}/sep_queue_$(date '+%Y%m%d_%H%M%S')_$$.log"
 
 # Defer handling queue management commands until functions are defined
 
@@ -1869,21 +1869,21 @@ EOF
 
     # Start memory monitor
     local monitor_pid=""
-    if [ -x "${SCRIPT_DIR}/memory_monitor.sh" ]; then
+    if [ -x "${SCRIPT_DIR}/sep_memory_monitor.sh" ]; then
         log INFO "Starting memory monitor"
-        "${SCRIPT_DIR}/memory_monitor.sh" --pid $$ --limit "$MEMORY_LIMIT_MB" &
+        "${SCRIPT_DIR}/sep_memory_monitor.sh" --pid $$ --limit "$MEMORY_LIMIT_MB" &
         monitor_pid=$!
     fi
 
-    # Ensure wait_all.sh is available
-    if [ ! -x "${SCRIPT_DIR}/wait_all.sh" ]; then
-        log ERROR "wait_all.sh not found at: ${SCRIPT_DIR}/wait_all.sh"
-        log ERROR "This script requires wait_all.sh for atomic execution"
+    # Ensure sep_wait_all.sh is available
+    if [ ! -x "${SCRIPT_DIR}/sep_wait_all.sh" ]; then
+        log ERROR "sep_wait_all.sh not found at: ${SCRIPT_DIR}/sep_wait_all.sh"
+        log ERROR "This script requires sep_wait_all.sh for atomic execution"
         return 1
     fi
 
-    # Execute through wait_all.sh with job ID
-    JOB_ID="$job_id" "${SCRIPT_DIR}/wait_all.sh" --timeout "$TIMEOUT" -- "$command" "${args[@]}"
+    # Execute through sep_wait_all.sh with job ID
+    JOB_ID="$job_id" "${SCRIPT_DIR}/sep_wait_all.sh" --timeout "$TIMEOUT" -- "$command" "${args[@]}"
     local exit_code=$?
 
     # Stop memory monitor
@@ -2126,7 +2126,7 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
     # STEP 1: Check if command can be atomified
     if [[ $ATOMIFY -eq 1 ]]; then
         # Source atomifier if available
-        ATOMIFIER_SCRIPT="${SCRIPT_DIR}/tool_atomifier.sh"
+        ATOMIFIER_SCRIPT="${SCRIPT_DIR}/sep_tool_atomifier.sh"
         if [[ -f "$ATOMIFIER_SCRIPT" ]]; then
             source "$ATOMIFIER_SCRIPT"
 

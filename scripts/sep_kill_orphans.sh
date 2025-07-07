@@ -37,20 +37,19 @@ PROCESSES CHECKED:
     - uv run commands
     - pre-commit hooks
     - ruff, mypy linters
-    - sequential-executor, wait_all, memory_monitor
+    - sep_queue, sep_wait_all, sep_memory_monitor
 
 LOCK CLEANUP:
     Removes stale locks from:
-    - /tmp/seq-exec-*
-    - /tmp/make-lock-*
-    - /tmp/git-safe-*
+    - /tmp/sep-exec-*
+    - PROJECT_ROOT/.sequential-locks/
 
 EXAMPLES:
     # Show what would be cleaned up
-    ./kill-orphans.sh --dry-run
+    ./sep_kill_orphans.sh --dry-run
 
     # Actually clean up orphans
-    ./kill-orphans.sh
+    ./sep_kill_orphans.sh
 
 SAFETY:
     - Only kills processes with parent PID = 1 (true orphans)
@@ -68,7 +67,7 @@ case "${1:-}" in
         show_help
         ;;
     --version)
-        echo "kill-orphans.sh v$VERSION"
+        echo "sep_kill_orphans.sh v$VERSION"
         exit 0
         ;;
     --dry-run)
@@ -95,9 +94,9 @@ PATTERNS=(
     "pre-commit"
     "ruff"
     "mypy"
-    "sequential-executor"
-    "wait_all"
-    "memory_monitor"
+    "sep_queue"
+    "sep_wait_all"
+    "sep_memory_monitor"
 )
 
 KILLED=0
@@ -168,7 +167,7 @@ fi
 LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
 
 # Check sequential executor locks
-for lock_dir in "$LOCK_BASE_DIR"/seq-exec-* /tmp/seq-exec-* /tmp/make-lock-*; do
+for lock_dir in "$LOCK_BASE_DIR"/sep-exec-* /tmp/sep-exec-* /tmp/make-lock-*; do
     if [[ -d "$lock_dir" ]]; then
         # Check if lock has a PID file
         if [[ -f "$lock_dir/current.pid" ]]; then

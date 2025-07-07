@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# wait_all.sh — Execute a command, wait for every descendant, with timeout,
-#               retries, JSON/log output, per-process memory tracking, and
-#               *automatic runner selection*.
+# sep_wait_all.sh — Execute a command, wait for every descendant, with timeout,
+#                   retries, JSON/log output, per-process memory tracking, and
+#                   *automatic runner selection*.
 #
 # -------------------------------------------------------------------------
 # USAGE
-#   ./wait_all.sh [OPTIONS] -- <…command and args…>
+#   ./sep_wait_all.sh [OPTIONS] -- <…command and args…>
 #
 #   (Legacy single-string form, still supported)
-#   ./wait_all.sh [OPTIONS] "<…command and args…>"
+#   ./sep_wait_all.sh [OPTIONS] "<…command and args…>"
 #
 # DESCRIPTION
 #  Executes the supplied command in a fresh process group and blocks until
@@ -27,7 +27,7 @@
 #
 #  --log <file>
 #        Write the detailed run log to <file>.  Defaults to
-#        ./logs/wait_all_<UTC-timestamp>.log (directory auto-created).
+#        ./logs/sep_wait_all_<UTC-timestamp>.log (directory auto-created).
 #
 #  --json
 #        Print a structured JSON object instead of raw stdout/stderr.  If
@@ -80,22 +80,22 @@
 # EXAMPLES
 #
 # 🔹 Classic
-#     ./wait_all.sh -- echo "hello world"
+#     ./sep_wait_all.sh -- echo "hello world"
 #
 # 🔹 Verbose mode
-#     ./wait_all.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
+#     ./sep_wait_all.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
 #
 # 🔹 Logging output (custom path)
-#     ./wait_all.sh --log /tmp/run.log -- python3 -c 'print(42)'
+#     ./sep_wait_all.sh --log /tmp/run.log -- python3 -c 'print(42)'
 #
 # 🔹 JSON output
-#     ./wait_all.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
+#     ./sep_wait_all.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
 #
 # 🔹 Kill if it takes too long
-#     ./wait_all.sh --timeout 5 -- sleep 10
+#     ./sep_wait_all.sh --timeout 5 -- sleep 10
 #
 # 🔹 Use SIGKILL instead of SIGTERM on timeout
-#     ./wait_all.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
+#     ./sep_wait_all.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
 #
 # 🔹 Retry command up to 3 times
 #     ./wait_all.sh --retry 3 -- bash -c 'echo fail ; exit 1'
@@ -134,7 +134,7 @@ VERSION='8.4.0'
 # ───────────────────────── Strict-mode & traps ───────────────────────────
 set -Eeuo pipefail
 
-SCRIPT_NAME=${0##*/}
+SCRIPT_NAME="sep_wait_all.sh"
 printf '\n%s v%s\n' "$SCRIPT_NAME" "$VERSION" >&2
 
 # ──────────────────────────── Help screen ────────────────────────────────
@@ -166,7 +166,7 @@ OPTIONS
 
   --log <file>
         Write the detailed run log to <file>.  Defaults to
-        ./logs/wait_all_<UTC-timestamp>.log (directory auto-created).
+        ./logs/sep_wait_all_<UTC-timestamp>.log (directory auto-created).
 
   --json
         Print a structured JSON object instead of raw stdout/stderr.  If
@@ -208,7 +208,7 @@ ENVIRONMENT
              Presence enables uv-based auto-runner substitutions.
 
 FILES
-  ./logs/wait_all_<timestamp>.log (default log path).
+  ./logs/sep_wait_all_<timestamp>.log (default log path).
 
 SEE ALSO
   timeout(1), jq(1), uv(1), pnpm(1), setsid(2), kill(1).
@@ -591,9 +591,9 @@ mkdir -p ./logs
 TIMESTAMP=$(date -u +"%Y%m%dT%H%M%SZ")
 # Use JOB_ID if provided (from sequential queue), otherwise use timestamp
 if [[ -n "${JOB_ID:-}" ]]; then
-  LOG_FILE="./logs/wait_all_${JOB_ID}.log"
+  LOG_FILE="./logs/sep_wait_all_${JOB_ID}.log"
 else
-  LOG_FILE="./logs/wait_all_${TIMESTAMP}.log"
+  LOG_FILE="./logs/sep_wait_all_${TIMESTAMP}.log"
 fi
 
 VERBOSE=0 JSON=0 TIMEOUT=0 KILL_SIGNAL="SIGTERM" RETRY_MAX=0 INSTALL_DEPS=0

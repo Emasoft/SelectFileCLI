@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# memory_monitor.sh - Monitor and kill processes exceeding memory limits
+# sep_memory_monitor.sh - Monitor and kill processes exceeding memory limits
 # Version: 8.4.0
 #
 # This script monitors all child processes of the sequential executor
@@ -17,7 +17,7 @@ reverse_lines() {
 # Configuration
 MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-2048}  # 2GB default
 CHECK_INTERVAL=${CHECK_INTERVAL:-5}       # Check every 5 seconds
-MONITOR_PID_FILE="/tmp/memory_monitor_$$.pid"
+MONITOR_PID_FILE="/tmp/sep_memory_monitor_$$.pid"
 
 # Get project root
 PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
@@ -130,7 +130,7 @@ monitor_processes() {
     local parent_pid=${1:-$$}
 
     # Create log file now that we have LOGS_DIR
-    LOG_FILE="${LOGS_DIR}/memory_monitor_$(date '+%Y%m%d_%H%M%S')_$$.log"
+    LOG_FILE="${LOGS_DIR}/sep_memory_monitor_$(date '+%Y%m%d_%H%M%S')_$$.log"
 
     log_info "Starting memory monitor for PID $parent_pid (limit: ${MEMORY_LIMIT_MB}MB)"
     log_info "Project: $PROJECT_ROOT"
@@ -197,15 +197,15 @@ monitor_processes() {
 # Display help message
 show_help() {
     cat << EOF
-memory_monitor.sh v$VERSION - Process memory monitoring and enforcement
+sep_memory_monitor.sh v$VERSION - Process memory monitoring and enforcement
 ====================================================================
 
  USAGE
-   ./memory_monitor.sh [OPTIONS]
+   ./sep_memory_monitor.sh [OPTIONS]
 
 DESCRIPTION:
     Monitors process memory usage and kills processes that exceed specified limits.
-    Designed to work with sequential-executor.sh to prevent memory explosions.
+    Designed to work with sep_queue.sh to prevent memory explosions.
 
 OPTIONS:
     --pid PID           Process ID to monitor (default: parent process)
@@ -274,7 +274,7 @@ while [[ $# -gt 0 ]]; do
             show_help
             ;;
         --version)
-            echo "memory_monitor.sh v$VERSION"
+            echo "sep_memory_monitor.sh v$VERSION"
             exit 0
             ;;
         *)

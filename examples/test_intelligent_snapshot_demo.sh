@@ -15,11 +15,11 @@ echo ""
 
 # Step 1: Detect snapshot tests
 echo "1. Detecting which tests use snapshot comparisons:"
-echo "   Running: python3 detect_snapshot_tests.py tests/test_file_browser_app.py"
+echo "   Running: python3 sep_detect_snapshot_tests.py tests/test_file_browser_app.py"
 echo ""
 
-if [[ -x "${SCRIPT_DIR}/detect_snapshot_tests.py" ]]; then
-    python3 "${SCRIPT_DIR}/detect_snapshot_tests.py" tests/test_file_browser_app.py 2>/dev/null | \
+if [[ -x "${SCRIPT_DIR}/../scripts/sep_detect_snapshot_tests.py" ]]; then
+    python3 "${SCRIPT_DIR}/../scripts/sep_detect_snapshot_tests.py" tests/test_file_browser_app.py 2>/dev/null | \
     python3 -c "
 import sys, json
 data = json.load(sys.stdin)
@@ -40,8 +40,8 @@ echo "   Command: pytest --snapshot-update tests/test_file_browser_app.py"
 echo ""
 
 # Count different types of commands
-snapshot_count=$(bash "${SCRIPT_DIR}/tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep -c "snapshot-update" || echo "0")
-regular_count=$(bash "${SCRIPT_DIR}/tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep -v "snapshot-update" | grep -c "ATOMIC:" || echo "0")
+snapshot_count=$(bash "${SCRIPT_DIR}/../scripts/sep_tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep -c "snapshot-update" || echo "0")
+regular_count=$(bash "${SCRIPT_DIR}/../scripts/sep_tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep -v "snapshot-update" | grep -c "ATOMIC:" || echo "0")
 
 echo "   Results:"
 echo "   - Commands WITH --snapshot-update: $snapshot_count (only snapshot tests, batched in pairs)"
@@ -51,10 +51,10 @@ echo ""
 echo "3. Example commands generated:"
 echo ""
 echo "   Snapshot tests (batched with --snapshot-update):"
-bash "${SCRIPT_DIR}/tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep "snapshot-update" | head -2 | sed 's/^/     /'
+bash "${SCRIPT_DIR}/../scripts/sep_tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep "snapshot-update" | head -2 | sed 's/^/     /'
 echo ""
 echo "   Regular tests (individual, no --snapshot-update):"
-bash "${SCRIPT_DIR}/tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep -v "snapshot-update" | grep "ATOMIC:" | head -3 | sed 's/^/     /'
+bash "${SCRIPT_DIR}/../scripts/sep_tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py 2>&1 | grep -v "snapshot-update" | grep "ATOMIC:" | head -3 | sed 's/^/     /'
 
 echo ""
 echo "4. Benefits of intelligent snapshot detection:"

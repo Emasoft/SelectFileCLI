@@ -12,16 +12,16 @@ import ast
 import sys
 import json
 from pathlib import Path
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Union
 
 
 class SnapshotTestDetector(ast.NodeVisitor):
     """AST visitor to detect snapshot test usage in test functions."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.snapshot_tests: Set[str] = set()
-        self.current_class = None
-        self.current_function = None
+        self.current_class: Union[str, None] = None
+        self.current_function: Union[str, None] = None
         self.snapshot_indicators = {
             "snap_compare",
             "snapshot",
@@ -30,7 +30,7 @@ class SnapshotTestDetector(ast.NodeVisitor):
             "snap_",
         }
 
-    def visit_ClassDef(self, node: ast.ClassDef):
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Visit class definitions to track test classes."""
         if node.name.startswith("Test"):
             old_class = self.current_class
@@ -40,7 +40,7 @@ class SnapshotTestDetector(ast.NodeVisitor):
         else:
             self.generic_visit(node)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef):
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """Visit function definitions to track test functions."""
         if node.name.startswith("test_"):
             old_function = self.current_function
@@ -59,11 +59,12 @@ class SnapshotTestDetector(ast.NodeVisitor):
         else:
             self.generic_visit(node)
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Visit async function definitions (same logic as regular functions)."""
-        self.visit_FunctionDef(node)
+        # Type-ignore because we're intentionally reusing logic
+        self.visit_FunctionDef(node)  # type: ignore[arg-type]
 
-    def _uses_snapshot(self, node: ast.FunctionDef) -> bool:
+    def _uses_snapshot(self, node: Union[ast.FunctionDef, ast.AsyncFunctionDef]) -> bool:
         """Check if a function uses snapshot testing."""
         for child in ast.walk(node):
             # Check for function calls
@@ -95,7 +96,7 @@ class SnapshotTestDetector(ast.NodeVisitor):
         return False
 
 
-def detect_snapshot_tests(test_file: str) -> Dict[str, List[str]]:
+def detect_snapshot_tests(test_file: str) -> Dict[str, Union[List[str], str]]:
     """
     Detect which tests in a file use snapshot testing.
 
@@ -105,7 +106,7 @@ def detect_snapshot_tests(test_file: str) -> Dict[str, List[str]]:
     Returns:
         Dictionary with 'snapshot_tests' and 'all_tests' lists
     """
-    result = {"snapshot_tests": [], "all_tests": [], "file": test_file}
+    result: Dict[str, Union[List[str], str]] = {"snapshot_tests": [], "all_tests": [], "file": test_file}
 
     try:
         # Check if file exists and is readable
@@ -147,7 +148,7 @@ def detect_snapshot_tests(test_file: str) -> Dict[str, List[str]]:
     return result
 
 
-def main():
+def main() -> None:
     """Main function for CLI usage."""
     if len(sys.argv) < 2:
         # Output empty result for missing arguments

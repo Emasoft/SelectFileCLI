@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# tool_atomifier.sh - Tool configuration and atomification logic
+# sep_tool_atomifier.sh - Tool configuration and atomification logic
 # Version: 8.4.0
 #
 # This script contains the configuration and logic for atomifying commands
@@ -787,15 +787,15 @@ generate_atomic_commands() {
 # Display help message
 show_help() {
     cat << 'EOF'
-tool_atomifier.sh v8.4.0 - Command atomification for sequential execution
+sep_tool_atomifier.sh v8.4.0 - Command atomification for sequential execution
 
 USAGE:
-    tool_atomifier.sh [OPTIONS] -- COMMAND [ARGS...]
-    tool_atomifier.sh COMMAND [ARGS...]
+    sep_tool_atomifier.sh [OPTIONS] -- COMMAND [ARGS...]
+    sep_tool_atomifier.sh COMMAND [ARGS...]
 
 DESCRIPTION:
     Breaks down tool commands into atomic file-level operations.
-    Used internally by sequential_queue.sh to process files individually.
+    Used internally by sep_queue.sh to process files individually.
 
 OPTIONS:
     --help, -h     Show this help message
@@ -811,19 +811,19 @@ SUPPORTED TOOLS:
 
 EXAMPLES:
     # Atomify ruff check command
-    tool_atomifier.sh ruff check src/
+    sep_tool_atomifier.sh ruff check src/
     # Output: Multiple ATOMIC: commands, one per file
 
     # Atomify pytest command
-    tool_atomifier.sh pytest tests/
+    sep_tool_atomifier.sh pytest tests/
     # Output: Multiple ATOMIC: commands, one per test function
 
     # Debug mode
-    DEBUG=1 tool_atomifier.sh mypy src/
+    DEBUG=1 sep_tool_atomifier.sh mypy src/
 
 OUTPUT FORMAT:
     Each line starts with "ATOMIC:" followed by the atomified command.
-    These are consumed by sequential_queue.sh for execution.
+    These are consumed by sep_queue.sh for execution.
 
 EOF
     exit 0
@@ -837,7 +837,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
             show_help
             ;;
         --version)
-            echo "tool_atomifier.sh v$VERSION"
+            echo "sep_tool_atomifier.sh v$VERSION"
             exit 0
             ;;
         --debug)

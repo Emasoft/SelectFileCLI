@@ -18,7 +18,7 @@ echo "1. Atomizing pytest command for tests/test_file_browser_app.py"
 echo "   Command: pytest tests/test_file_browser_app.py"
 echo ""
 echo "   Atomic commands generated:"
-"$SCRIPT_DIR/tool_atomifier.sh" pytest tests/test_file_browser_app.py | head -5
+"$SCRIPT_DIR/../scripts/sep_tool_atomifier.sh" pytest tests/test_file_browser_app.py | head -5
 echo "   ... (showing first 5 of many)"
 echo ""
 
@@ -27,7 +27,7 @@ echo "2. Atomizing pytest with --snapshot-update (batches of 2)"
 echo "   Command: pytest --snapshot-update tests/test_file_browser_app.py"
 echo ""
 echo "   Atomic commands generated:"
-"$SCRIPT_DIR/tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py | head -5
+"$SCRIPT_DIR/../scripts/sep_tool_atomifier.sh" pytest --snapshot-update tests/test_file_browser_app.py | head -5
 echo "   ... (notice tests are batched in pairs)"
 echo ""
 
@@ -35,17 +35,17 @@ echo ""
 echo "3. To run atomized tests through sequential queue:"
 echo ""
 echo "   # Add atomized pytest command to queue"
-echo "   sequential_queue.sh --atomify pytest tests/test_file_browser_app.py"
+echo "   sep_queue.sh --atomify pytest tests/test_file_browser_app.py"
 echo ""
 echo "   # Start processing the queue"
-echo "   sequential_queue.sh --queue-start"
+echo "   sep_queue.sh --queue-start"
 echo ""
 
 # Step 4: Show how results are collected
 echo "4. Test results are automatically collected:"
 echo ""
-echo "   - Job metadata stored in: ~/.sequential_queue/runs/run_*/jobs/*.txt"
-echo "   - Pytest results in JSON: ~/.sequential_queue/runs/run_*/jobs/*_pytest_results.json"
+echo "   - Job metadata stored in: ./logs/runs/run_*/jobs/*.txt"
+echo "   - Pytest results in JSON: ./logs/runs/run_*/jobs/*_pytest_results.json"
 echo "   - Summary stats added to job metadata (TESTS_PASSED, TESTS_FAILED, TESTS_TOTAL)"
 echo ""
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# monitor-queue.sh - Monitor the sequential execution queue and system state
+# sep_monitor_queue.sh - Monitor the sequential execution queue and system state
 # Version: 8.4.0
 #
 set -euo pipefail
@@ -9,10 +9,10 @@ VERSION='8.4.0'
 # Display help message
 show_help() {
     cat << 'EOF'
-monitor-queue.sh v8.4.0 - Real-time sequential execution queue monitor
+sep_monitor_queue.sh v8.4.0 - Real-time sequential execution queue monitor
 
 USAGE:
-    monitor-queue.sh [OPTIONS]
+    sep_monitor_queue.sh [OPTIONS]
 
 DESCRIPTION:
     Displays real-time status of the sequential execution queue,
@@ -49,15 +49,15 @@ COLOR CODING:
 
 EXAMPLES:
     # Monitor queue in real-time
-    ./monitor-queue.sh
+    ./sep_monitor_queue.sh
 
     # Watch queue in separate terminal
-    watch -n 1 ./monitor-queue.sh
+    watch -n 1 ./sep_monitor_queue.sh
 
 TROUBLESHOOTING:
     If queue appears stuck:
     1. Check for orphaned processes
-    2. Run ./kill-orphans.sh --dry-run to see what can be cleaned
+    2. Run ./sep_kill_orphans.sh --dry-run to see what can be cleaned
     3. Check lock files for stale locks
 
 EOF
@@ -71,7 +71,7 @@ fi
 
 # Check for version flag
 if [[ "${1:-}" == "--version" ]]; then
-    echo "monitor-queue.sh v$VERSION"
+    echo "sep_monitor_queue.sh v$VERSION"
     exit 0
 fi
 
@@ -88,7 +88,7 @@ fi
 
 # State files (consistent naming across all scripts)
 LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
-LOCK_DIR="${LOCK_BASE_DIR}/seq-exec-${PROJECT_HASH}"
+LOCK_DIR="${LOCK_BASE_DIR}/sep-exec-${PROJECT_HASH}"
 LOCKFILE="${LOCK_DIR}/executor.lock"
 QUEUE_FILE="${LOCK_DIR}/queue.txt"
 CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
@@ -267,7 +267,7 @@ while true; do
                 ;;
             k|K)
                 echo -e "\n${RED}Killing all processes...${NC}"
-                pkill -f "sequential_queue.sh" || true
+                pkill -f "sep_queue.sh" || true
                 pkill -f pytest || true
                 rm -f "$LOCKFILE" "$CURRENT_PID_FILE" "$QUEUE_FILE"
                 ;;
