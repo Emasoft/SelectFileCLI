@@ -21,14 +21,12 @@ jobs:
         uv sync --locked
     - name: Build package
       run: |
-        ./scripts/sep_queue.sh --timeout 3600 -- uv build
+        uv build
     - name: Check dist contents
       run: |
         ls -la dist/
     - name: Test wheel installation
       run: |-
-        ./scripts/sep_queue.sh --timeout 1800 -- bash -c '
-          uv venv test-env &&
-          uv pip install --python test-env/bin/python dist/*.whl &&
-          test-env/bin/python -c "from selectfilecli import select_file; print(\"Import successful\")"
-        '
+        uv venv test-env
+        uv pip install --python test-env/bin/python dist/*.whl
+        test-env/bin/python -c "from selectfilecli import select_file; print(\"Import successful\")"
