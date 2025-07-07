@@ -58,7 +58,7 @@ repos:
     hooks:
       - id: trufflehog
         name: TruffleHog v3
-        entry: trufflehog git file://. --only-verified --fail --no-update --exclude-paths=snapshot_report.html
+        entry: trufflehog git file://. --only-verified --fail --no-update
         language: golang
         pass_filenames: false
         require_serial: true

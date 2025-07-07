@@ -325,8 +325,8 @@ class SortDialog(ModalScreen[tuple[SortMode, SortOrder]]):
 class CustomDirectoryTree(DirectoryTree):
     """Extended DirectoryTree with sorting capabilities and file info display."""
 
-    tree_sort_mode = reactive(SortMode.NAME)
-    tree_sort_order = reactive(SortOrder.ASCENDING)
+    tree_sort_mode = reactive(SortMode.NAME, layout=True)
+    tree_sort_order = reactive(SortOrder.ASCENDING, layout=True)
     allow_file_select = reactive(True)
     allow_dir_select = reactive(False)
 
@@ -664,11 +664,11 @@ class CustomDirectoryTree(DirectoryTree):
         for child in node._children:
             if not child.data:
                 continue
-            
+
             path = self._get_path_from_node_data(child.data)
             if not path or str(path) == "<...loading...>":
                 continue
-                
+
             try:
                 # Check for indicators
                 indicators = ""
@@ -676,7 +676,7 @@ class CustomDirectoryTree(DirectoryTree):
                     indicators += "✨"
                 if not os.access(path, os.W_OK):
                     indicators += "🔒"
-                
+
                 # Calculate visual width of indicators
                 visual_width = 0
                 for char in indicators:
@@ -687,10 +687,10 @@ class CustomDirectoryTree(DirectoryTree):
                 max_indicator_width = max(max_indicator_width, visual_width)
             except (OSError, AttributeError):
                 continue
-        
+
         # Use at least the default width, or the max found
         max_indicator_width = max(max_indicator_width, INDICATOR_COLUMN_WIDTH) if max_indicator_width > 0 else INDICATOR_COLUMN_WIDTH
-        
+
         # Store calculated widths
         self._column_widths = {"filename": max_filename_width, "size": max_size_width, "date": DATE_COLUMN_WIDTH, "indicators": max_indicator_width}
 
@@ -966,7 +966,7 @@ class CustomDirectoryTree(DirectoryTree):
         if self.root and self.root.is_expanded:
             self._calculate_column_widths(self.root)
 
-        self.refresh()
+        # No need for manual refresh() - reactive attributes with layout=True handle this
 
     def on_resize(self, event: Any) -> None:
         """Handle terminal resize events by recalculating column widths."""
@@ -983,8 +983,7 @@ class CustomDirectoryTree(DirectoryTree):
         if self.root:
             recalc_node(self.root)
 
-        # Force a full refresh to redraw with new column widths
-        self.refresh()
+        # Textual automatically handles resize refresh - no manual refresh needed
 
     def on_tree_node_expanded(self, event: Tree.NodeExpanded[DirEntry]) -> None:
         """Handle when a tree node is expanded to ensure proper sorting."""
@@ -1279,7 +1278,7 @@ class FileBrowserApp(App[Optional[FileInfo]]):
             else:
                 node.expand()
                 tree.sort_children_by_mode(node)
-            tree.refresh()
+            # No manual refresh needed - tree operations trigger automatic updates
 
     def _create_file_info(self, path: Path, is_file: bool) -> None:
         """Create FileInfo object and exit the app."""

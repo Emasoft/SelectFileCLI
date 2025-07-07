@@ -42,7 +42,7 @@
 import os
 import tempfile
 from pathlib import Path
-from unittest.mock import patch, Mock
+from unittest.mock import patch
 import time
 from typing import Generator, Any, Callable
 
@@ -542,6 +542,8 @@ class TestSortDialogAdditional:
             tree = app.query_one(CustomDirectoryTree)
 
             # Create a mock node with children
+            from unittest.mock import Mock
+
             mock_node = Mock()
             mock_child = Mock()
 
@@ -657,6 +659,8 @@ class TestSortDialogAdditional:
             tree = app.query_one(CustomDirectoryTree)
 
             # Create a mock node for a file (not a directory)
+            from unittest.mock import Mock
+
             mock_node = Mock()
             mock_node.data = Mock()
             mock_node.data.path = Mock()
@@ -886,53 +890,58 @@ class TestSortDialogAdditional:
             regular_file = test_dir / "test.txt"
             regular_file.write_text("Hello world")
 
-            # Create a larger file
+            # Create a moderately sized file (100KB instead of 5MB)
             large_file = test_dir / "large.bin"
-            large_file.write_bytes(b"x" * 5242880)  # 5MB
+            large_file.write_bytes(b"x" * 102400)  # 100KB - much smaller to avoid memory issues
 
             app = FileBrowserApp(str(test_dir))
 
             async with app.run_test() as pilot:
+                # Wait for the app to fully load
+                await pilot.pause(0.1)
+
+                # Expand the root node to load the files
                 tree = app.query_one(CustomDirectoryTree)
+                tree.root.expand()
+                await pilot.pause(0.2)  # Wait for expansion
 
-                # Create a mock node for testing
-                from unittest.mock import Mock
+                # Find the actual nodes in the tree
+                regular_node = None
+                large_node = None
 
-                # Test regular file
-                node = Mock()
-                node.data = Mock(path=str(regular_file))
-                node.parent = Mock()  # Not None
+                for child in tree.root.children:
+                    if child.data and hasattr(child.data, "path"):
+                        child_path = Path(child.data.path)
+                        if child_path.name == "test.txt":
+                            regular_node = child
+                        elif child_path.name == "large.bin":
+                            large_node = child
 
-                # Mock base styles to avoid None error
+                # Verify nodes were found
+                assert regular_node is not None, "Could not find test.txt node"
+                assert large_node is not None, "Could not find large.bin node"
+
+                # Test the rendered labels using the actual render_label method
                 from rich.style import Style
 
                 base_style = Style()
                 style = Style()
 
-                # We need to mock the super().render_label call
-                with patch.object(DirectoryTree, "render_label", return_value=Text("test.txt")):
-                    label = tree.render_label(node, base_style, style)
-                    label_text = label.plain
-
-                # Should contain filename
-                assert "test.txt" in label_text
-                # Should contain file size
-                assert "11 B" in label_text  # "Hello world" is 11 bytes
-                # Should not have symlink emoji
-                assert "🔗" not in label_text
-
-                # Test large file
-                node_large = Mock()
-                node_large.data = Mock(path=str(large_file))
-                node_large.parent = Mock()
-
-                with patch.object(DirectoryTree, "render_label", return_value=Text("large.bin")):
-                    label_large = tree.render_label(node_large, base_style, style)
-                    label_large_text = label_large.plain
+                # Test regular file label
+                regular_label = tree.render_label(regular_node, base_style, style)
+                regular_text = regular_label.plain
 
                 # Should contain filename and size
-                assert "large.bin" in label_large_text
-                assert "5.00 MB" in label_large_text
+                assert "test.txt" in regular_text
+                assert "11 B" in regular_text  # "Hello world" is 11 bytes
+
+                # Test large file label
+                large_label = tree.render_label(large_node, base_style, style)
+                large_text = large_label.plain
+
+                # Should contain filename and size
+                assert "large.bin" in large_text
+                assert "100.00 KB" in large_text  # 100KB file
 
     @pytest.mark.asyncio
     async def test_render_label_symlink(self):
@@ -949,21 +958,32 @@ class TestSortDialogAdditional:
             app = FileBrowserApp(str(test_dir))
 
             async with app.run_test() as pilot:
-                tree = app.query_one(CustomDirectoryTree)
+                await pilot.pause(0.1)
 
-                # Create mock node for symlink
-                from unittest.mock import Mock
+                # Expand the root node to load the files
+                tree = app.query_one(CustomDirectoryTree)
+                tree.root.expand()
+                await pilot.pause(0.2)  # Wait for expansion
+
+                # Find the symlink node
+                symlink_node = None
+                for child in tree.root.children:
+                    if child.data and hasattr(child.data, "path"):
+                        child_path = Path(child.data.path)
+                        if child_path.name == "link.txt":
+                            symlink_node = child
+                            break
+
+                assert symlink_node is not None, "Could not find link.txt node"
+
+                # Test the rendered label
                 from rich.style import Style
 
-                node = Mock()
-                node.data = Mock(path=str(symlink))
-                node.parent = Mock()
                 base_style = Style()
                 style = Style()
 
-                with patch.object(DirectoryTree, "render_label", return_value=Text("link.txt")):
-                    label = tree.render_label(node, base_style, style)
-                    label_text = label.plain
+                label = tree.render_label(symlink_node, base_style, style)
+                label_text = label.plain
 
                 # Should contain symlink suffix
                 assert "@" in label_text
@@ -983,21 +1003,32 @@ class TestSortDialogAdditional:
             app = FileBrowserApp(str(test_dir))
 
             async with app.run_test() as pilot:
-                tree = app.query_one(CustomDirectoryTree)
+                await pilot.pause(0.1)
 
-                # Create mock node
-                from unittest.mock import Mock
+                # Expand the root node to load the files
+                tree = app.query_one(CustomDirectoryTree)
+                tree.root.expand()
+                await pilot.pause(0.2)  # Wait for expansion
+
+                # Find the readonly file node
+                readonly_node = None
+                for child in tree.root.children:
+                    if child.data and hasattr(child.data, "path"):
+                        child_path = Path(child.data.path)
+                        if child_path.name == "readonly.txt":
+                            readonly_node = child
+                            break
+
+                assert readonly_node is not None, "Could not find readonly.txt node"
+
+                # Test the rendered label
                 from rich.style import Style
 
-                node = Mock()
-                node.data = Mock(path=str(readonly_file))
-                node.parent = Mock()
                 base_style = Style()
                 style = Style()
 
-                with patch.object(DirectoryTree, "render_label", return_value=Text("readonly.txt")):
-                    label = tree.render_label(node, base_style, style)
-                    label_text = label.plain
+                label = tree.render_label(readonly_node, base_style, style)
+                label_text = label.plain
 
                 # Should contain lock emoji
                 assert "🔒" in label_text
@@ -1119,6 +1150,8 @@ class TestSortDialogAdditional:
             tree = app.query_one(CustomDirectoryTree)
 
             # Create a mock node with children that raise AttributeError
+            from unittest.mock import Mock
+
             mock_node = Mock()
             mock_child = Mock()
             mock_child.data = None  # This will cause AttributeError when accessing .path

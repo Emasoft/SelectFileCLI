@@ -1,0 +1,54 @@
+=== PYTEST ATOMIZATION AND RESULT COLLECTION SUMMARY ===
+
+The sequential queue system now supports advanced pytest test atomization to prevent
+memory explosions and provide detailed test result tracking.
+
+KEY FEATURES:
+
+1. AUTOMATIC TEST ATOMIZATION
+   - Breaks down `pytest tests/` into individual test functions
+   - Uses proper pytest collection syntax: `pytest file.py::TestClass::test_method`
+   - Batches snapshot tests (with --snapshot-update) in groups of 2
+
+2. TEST RESULT COLLECTION
+   - Automatically parses pytest output after each test run
+   - Stores detailed results in JSON format
+   - Tracks PASSED/FAILED/SKIPPED status for each test
+   - Adds summary statistics to job metadata
+
+3. RESULT AGGREGATION
+   - Aggregates results across all atomized test jobs
+   - Provides overall pass rate and statistics
+   - Lists failed tests with their job IDs for debugging
+
+USAGE EXAMPLES:
+
+# Add atomized pytest command to queue
+sequential_queue.sh --atomify pytest tests/test_file_browser_app.py
+
+# View how command will be atomized (dry run)
+scripts/tool_atomifier.sh pytest tests/test_file_browser_app.py
+
+# Start processing the queue
+sequential_queue.sh --queue-start
+
+# View aggregated test results from latest run
+scripts/aggregate_test_results.sh
+
+# List all runs with pytest jobs
+scripts/aggregate_test_results.sh --list
+
+# View results from specific run
+scripts/aggregate_test_results.sh run_20240106_123456
+
+FILE LOCATIONS:
+- Job metadata: ~/.sequential_queue/runs/run_*/jobs/*.txt
+- Pytest JSON results: ~/.sequential_queue/runs/run_*/jobs/*_pytest_results.json
+- Logs: ~/.sequential_queue/logs/wait_all_*.log
+
+BENEFITS:
+✓ Prevents memory explosions from large test suites
+✓ Better test isolation and debugging
+✓ Detailed tracking of individual test failures
+✓ Automatic result collection and reporting
+✓ Works with existing sequential queue infrastructure

@@ -245,16 +245,16 @@ queue_status() {
 # Sets: RUN_ID, START_TIME, PID, STATUS, PROJECT, END_TIME, DURATION, EXIT_CODE, BRANCH, WORKFLOW, RUN_USER, COMMIT, EVENT, CREATED
 load_metadata() {
     local meta_file="$1"
-    
+
     # Reset variables
     RUN_ID="" START_TIME="" PID="" STATUS="" PROJECT="" END_TIME="" DURATION="" EXIT_CODE="" BRANCH="" WORKFLOW=""
     RUN_USER="" COMMIT="" EVENT="" CREATED=""  # New fields (RUN_USER to avoid conflict with system USER)
     JOB_ID="" COMMAND="" LOG_FILE=""  # Job-specific fields
-    
+
     if [[ ! -f "$meta_file" ]]; then
         return 1
     fi
-    
+
     while IFS='=' read -r key value; do
         case "$key" in
             RUN_ID) RUN_ID="$value" ;;
@@ -279,7 +279,7 @@ load_metadata() {
             LOG_FILE) LOG_FILE="$value" ;;
         esac
     done < "$meta_file"
-    
+
     # Provide defaults for backward compatibility
     if [[ -z "$RUN_USER" ]]; then
         RUN_USER="${USER:-unknown}"  # Use system USER as fallback
@@ -290,7 +290,7 @@ load_metadata() {
     if [[ -z "$CREATED" ]] && [[ -n "$START_TIME" ]]; then
         CREATED="$START_TIME"
     fi
-    
+
     return 0
 }
 
@@ -300,11 +300,11 @@ load_metadata() {
 get_status_display() {
     local status="$1"
     local exit_code="${2:-0}"
-    
+
     case $status in
-        running) 
+        running)
             STATUS_ICON="⚡"
-            STATUS_COLOR="$YELLOW" 
+            STATUS_COLOR="$YELLOW"
             ;;
         completed)
             if [[ "$exit_code" -eq 0 ]]; then
@@ -315,13 +315,13 @@ get_status_display() {
                 STATUS_COLOR="$RED"
             fi
             ;;
-        stopped) 
+        stopped)
             STATUS_ICON="⊘"
-            STATUS_COLOR="$YELLOW" 
+            STATUS_COLOR="$YELLOW"
             ;;
-        *) 
+        *)
             STATUS_ICON="?"
-            STATUS_COLOR="$NC" 
+            STATUS_COLOR="$NC"
             ;;
     esac
 }
@@ -332,14 +332,14 @@ get_status_display() {
 calculate_duration() {
     local start_time="$1"
     local end_time="$2"
-    
+
     local start_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$start_time" "+%s" 2>/dev/null || date -d "$start_time" "+%s" 2>/dev/null || echo 0)
     local end_epoch=$(date -j -f "%Y-%m-%d %H:%M:%S" "$end_time" "+%s" 2>/dev/null || date -d "$end_time" "+%s" 2>/dev/null || echo 0)
     local duration=$((end_epoch - start_epoch))
     local hours=$((duration / 3600))
     local minutes=$(((duration % 3600) / 60))
     local seconds=$((duration % 60))
-    
+
     DURATION_STR="${hours}h ${minutes}m ${seconds}s"
 }
 
@@ -349,7 +349,7 @@ calculate_duration() {
 parse_date_to_epoch() {
     local date_str="$1"
     local format="${2:-%Y-%m-%d %H:%M:%S}"
-    
+
     # Try macOS date first
     local epoch=$(date -j -f "$format" "$date_str" "+%s" 2>/dev/null)
     if [[ -z "$epoch" ]] || [[ "$epoch" == "0" ]]; then
@@ -396,7 +396,7 @@ queue_start() {
         commit_sha=$(git -C "$PROJECT_ROOT" rev-parse HEAD 2>/dev/null || echo "")
         git_user=$(git -C "$PROJECT_ROOT" config user.name 2>/dev/null || echo "${USER:-unknown}")
     fi
-    
+
     # Store run metadata
     cat > "${run_meta_dir}/metadata.txt" << EOF
 RUN_ID=$run_id
@@ -590,7 +590,7 @@ reopen_queue() {
 
 # List runs (similar to gh run list)
 # Shows recent queue runs with filtering and formatting options
-# 
+#
 # Arguments:
 #   $1 - limit: Maximum number of runs to show (default: 20)
 #   $2 - status_filter: Filter by status (running, completed, stopped)
@@ -623,13 +623,13 @@ list_runs() {
     local event_filter="${11:-}"
     local created_filter="${12:-}"
     local jq_filter="${13:-}"
-    
+
     # Determine current branch if in git repo
     local current_branch=""
     if [[ -d "$PROJECT_ROOT/.git" ]]; then
         current_branch=$(git -C "$PROJECT_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
     fi
-    
+
     # Get runs sorted by date (newest first)
     local runs=()
     if [[ -d "$RUNS_DIR" ]]; then
@@ -650,7 +650,7 @@ list_runs() {
             done | sort -rn | cut -d' ' -f2- | xargs -n1 basename)
         fi
     fi
-    
+
     if [[ ${#runs[@]} -eq 0 ]]; then
         if [[ "$json_output" == "true" ]]; then
             echo "[]"
@@ -659,19 +659,19 @@ list_runs() {
         fi
         return 0
     fi
-    
+
     # Filter and display runs
     local count=0
     local json_array="["
     local first_item=true
-    
+
     for run in "${runs[@]}"; do
         [[ $count -ge $limit ]] && break
-        
+
         local meta_file="${RUNS_DIR}/${run}/metadata.txt"
         # Load run metadata using helper function
         load_metadata "$meta_file" || continue
-        
+
         # Apply filters
         if [[ -n "$status_filter" ]]; then
             # Special handling for "failed" status
@@ -683,33 +683,33 @@ list_runs() {
                 continue
             fi
         fi
-        
+
         # If no branch in metadata, assume current branch
         if [[ -z "$BRANCH" ]] && [[ -n "$current_branch" ]]; then
             BRANCH="$current_branch"
         fi
-        
+
         if [[ -n "$branch_filter" ]] && [[ "$BRANCH" != "$branch_filter" ]]; then
             continue
         fi
-        
+
         if [[ -n "$workflow_filter" ]] && [[ "$WORKFLOW" != "$workflow_filter" ]]; then
             continue
         fi
-        
+
         # Apply additional filters
         if [[ -n "$user_filter" ]] && [[ "$RUN_USER" != "$user_filter" ]]; then
             continue
         fi
-        
+
         if [[ -n "$commit_filter" ]] && [[ "$COMMIT" != "$commit_filter" ]]; then
             continue
         fi
-        
+
         if [[ -n "$event_filter" ]] && [[ "$EVENT" != "$event_filter" ]]; then
             continue
         fi
-        
+
         # Date filter - compare created date
         if [[ -n "$created_filter" ]]; then
             # Convert both dates to epoch for comparison
@@ -719,7 +719,7 @@ list_runs() {
                 continue
             fi
         fi
-        
+
         # Count jobs
         local job_count=0
         if [[ -d "${RUNS_DIR}/${run}/jobs" ]]; then
@@ -728,11 +728,11 @@ list_runs() {
                 [[ -f "$job_file" ]] && ((job_count++))
             done
         fi
-        
+
         if [[ "$json_output" == "true" ]]; then
             [[ "$first_item" == "false" ]] && json_array+=","
             first_item=false
-            
+
             # Map our status to GitHub status names
             local gh_status="$STATUS"
             if [[ "$STATUS" == "running" ]]; then
@@ -744,11 +744,11 @@ list_runs() {
             elif [[ "$STATUS" == "stopped" ]]; then
                 gh_status="cancelled"
             fi
-            
+
             # Calculate elapsed time
             local created_at="$START_TIME"
             local updated_at="${END_TIME:-$(date '+%Y-%m-%d %H:%M:%S')}"
-            
+
             json_array+="{\"databaseId\":$count,"
             json_array+="\"name\":\"$RUN_ID\","
             json_array+="\"displayTitle\":\"Queue Run $RUN_ID\","
@@ -768,7 +768,7 @@ list_runs() {
         else
             # Terminal output - use helper for status display
             get_status_display "$STATUS" "${EXIT_CODE:-0}"
-            
+
             printf "${STATUS_COLOR}%s${NC} %-20s %-10s %s" "$STATUS_ICON" "$RUN_ID" "$STATUS" "$START_TIME"
             if [[ -n "$BRANCH" ]]; then
                 printf " (branch: %s)" "$BRANCH"
@@ -781,30 +781,30 @@ list_runs() {
             fi
             echo ""
         fi
-        
+
         ((count++)) || true
     done
-    
+
     if [[ "$json_output" == "true" ]]; then
         json_array+="]"
-        
+
         # Apply field filtering and/or JQ filtering
         local output="$json_array"
-        
+
         # Field filtering
         if [[ -n "$json_fields" ]] && command -v jq >/dev/null 2>&1; then
             # Convert space-separated fields to JQ select expression
             local field_list=$(echo "$json_fields" | tr ' ' ',')
             output=$(echo "$output" | jq ".[] | {$field_list}" | jq -s '.')
         fi
-        
+
         # JQ expression filtering
         if [[ -n "$jq_filter" ]] && command -v jq >/dev/null 2>&1; then
             output=$(echo "$output" | jq "$jq_filter")
         elif [[ -n "$jq_filter" ]]; then
             echo "Warning: jq not installed, cannot apply filter" >&2
         fi
-        
+
         echo "$output"
     fi
 }
@@ -826,7 +826,7 @@ watch_run() {
     local interval="${2:-$DEFAULT_WATCH_INTERVAL}"
     local exit_status="${3:-false}"
     local compact="${4:-false}"
-    
+
     # If no run_id specified, get the latest running run
     if [[ -z "$run_id" ]]; then
         if [[ -d "$RUNS_DIR" ]]; then
@@ -843,28 +843,28 @@ watch_run() {
                 fi
             done
         fi
-        
+
         if [[ -z "$run_id" ]]; then
             echo "No running runs found."
             return 1
         fi
     fi
-    
+
     local meta_file="${RUNS_DIR}/${run_id}/metadata.txt"
     if [[ ! -f "$meta_file" ]]; then
         echo "Error: Run $run_id not found."
         return 1
     fi
-    
+
     # Watch loop
     local last_job_count=0
     while true; do
         # Clear screen
         printf "\033c"
-        
+
         # Load run metadata using helper
         load_metadata "$meta_file"
-        
+
         # Display header
         echo "Watching run: $RUN_ID"
         echo "Status: $STATUS"
@@ -876,7 +876,7 @@ watch_run() {
             echo "Branch: $BRANCH"
         fi
         echo ""
-        
+
         # Display jobs
         echo "Jobs:"
         echo "====="
@@ -896,20 +896,20 @@ watch_run() {
                         EXIT_CODE) JOB_EXIT="$value" ;;
                     esac
                 done < "$job_meta"
-                
+
                 # Skip if compact mode and job succeeded
                 if [[ "$compact" == "true" ]] && [[ "$JOB_STATUS" == "completed" ]] && [[ "${JOB_EXIT:-0}" -eq 0 ]]; then
                     continue
                 fi
-                
+
                 # Use helper for job status display
                 get_status_display "$JOB_STATUS" "${JOB_EXIT:-0}"
-                
+
                 printf "${STATUS_COLOR}%s${NC} %-20s %s\n" "$STATUS_ICON" "$JOB_ID" "$JOB_COMMAND"
                 ((job_count++)) || true
             done
         fi
-        
+
         # Check if run completed
         if [[ "$STATUS" != "running" ]]; then
             echo ""
@@ -917,19 +917,19 @@ watch_run() {
             if [[ -n "$EXIT_CODE" ]]; then
                 echo "Exit code: $EXIT_CODE"
             fi
-            
+
             if [[ "$exit_status" == "true" ]] && [[ -n "$EXIT_CODE" ]]; then
                 exit "$EXIT_CODE"
             else
                 exit 0
             fi
         fi
-        
+
         # Show update time
         echo ""
         echo "Last updated: $(date '+%Y-%m-%d %H:%M:%S')"
         echo "Press Ctrl+C to stop watching"
-        
+
         # Sleep for interval
         sleep "$interval"
     done
@@ -958,7 +958,7 @@ view_runs() {
     local verbose="$5"
     local exit_status="$6"
     local attempt="$7"
-    
+
     # Note: attempt parameter is accepted for GitHub CLI compatibility but not used
     # as this implementation doesn't support retrying failed runs
     if [[ -n "$attempt" ]] && [[ "$attempt" != "1" ]]; then
@@ -1161,7 +1161,7 @@ view_run() {
             echo ""
         done
     fi
-    
+
     # Handle exit status flag
     if [[ "$exit_status" == "true" ]] && [[ -n "${EXIT_CODE:-}" ]]; then
         exit "$EXIT_CODE"
@@ -1310,7 +1310,7 @@ while [[ $# -gt 0 ]]; do
                 echo "Available subcommands: list, view, watch" >&2
                 exit 1
             fi
-            
+
             case $1 in
                 list)
                     QUEUE_COMMAND="list"
@@ -1534,7 +1534,7 @@ PAUSE_FILE="${LOCK_DIR}/paused"
 RUNNING_FILE="${LOCK_DIR}/running"
 CLOSED_FILE="${LOCK_DIR}/closed"
 RUN_START_FILE="${LOCK_DIR}/run_start"
-RUNS_DIR="${LOCK_DIR}/runs"
+RUNS_DIR="${LOGS_DIR}/runs"
 CURRENT_RUN_FILE="${LOCK_DIR}/current_run"
 
 # Ensure lock directory exists
@@ -1905,6 +1905,49 @@ EOF
                 local wait_all_log="${LOGS_DIR}/wait_all_${job_id}.log"
                 if [[ -f "$wait_all_log" ]]; then
                     echo "LOG_FILE=$wait_all_log" >> "$job_meta_file"
+
+                    # Parse pytest results if this was a pytest command
+                    if [[ "$command" == "pytest" ]] || [[ "$cmd_string" =~ pytest ]]; then
+                        local results_file="${RUNS_DIR}/${run_id}/jobs/${job_id}_pytest_results.json"
+                        if [[ -x "${SCRIPT_DIR}/parse_pytest_results.sh" ]]; then
+                            "${SCRIPT_DIR}/parse_pytest_results.sh" "$wait_all_log" "$results_file" >/dev/null 2>&1 || true
+                            if [[ -f "$results_file" ]]; then
+                                echo "PYTEST_RESULTS=$results_file" >> "$job_meta_file"
+
+                                # Extract summary stats and add to metadata
+                                local passed=$(python3 -c "import json; d=json.load(open('$results_file')); print(d.get('summary',{}).get('passed',0))" 2>/dev/null || echo "0")
+                                local failed=$(python3 -c "import json; d=json.load(open('$results_file')); print(d.get('summary',{}).get('failed',0))" 2>/dev/null || echo "0")
+                                local total=$(python3 -c "import json; d=json.load(open('$results_file')); print(d.get('summary',{}).get('total',0))" 2>/dev/null || echo "0")
+
+                                echo "TESTS_PASSED=$passed" >> "$job_meta_file"
+                                echo "TESTS_FAILED=$failed" >> "$job_meta_file"
+                                echo "TESTS_TOTAL=$total" >> "$job_meta_file"
+
+                                # Print test results to run log
+                                if [[ -n "$run_log" ]] && [[ -f "$run_log" ]]; then
+                                    echo "" >> "$run_log"
+                                    echo "Test Results: PASSED=$passed FAILED=$failed TOTAL=$total" >> "$run_log"
+                                    if [[ $failed -gt 0 ]]; then
+                                        echo "FAILED TESTS:" >> "$run_log"
+                                        python3 -c "
+import json
+with open('$results_file') as f:
+    data = json.load(f)
+    for test in data.get('tests', []):
+        if test.get('result') == 'FAILED':
+            print(f\"  - {test.get('test', 'unknown')}\")" >> "$run_log" 2>/dev/null || true
+                                    fi
+                                fi
+
+                                # Also print to job log
+                                echo "" >> "$wait_all_log"
+                                echo "=== TEST RESULTS ===" >> "$wait_all_log"
+                                echo "PASSED: $passed" >> "$wait_all_log"
+                                echo "FAILED: $failed" >> "$wait_all_log"
+                                echo "TOTAL: $total" >> "$wait_all_log"
+                            fi
+                        fi
+                    fi
                 fi
             fi
         fi
@@ -2120,10 +2163,3 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
     echo "[SEQ-QUEUE] Command added to queue"
     echo "[SEQ-QUEUE] Use 'sequential_queue.sh --queue-start' to begin processing"
 fi
-
-
-
-
-
-
-
