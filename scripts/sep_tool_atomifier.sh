@@ -11,6 +11,10 @@
 # - Added missing sep_common.sh sourcing
 # - Added unittest support for test-method atomization (second-tier)
 # - unittest atomization only enabled with --enable-second-tier flag
+# - CRITICAL: Added safety check to block ALL second-tier tool atomization without flag
+# - Fixed pytest to detect :: syntax and avoid double-atomization
+# - Changed nose2, ward, behave to no-atomize (no implementation = no atomization)
+# - Safety principle: When in doubt, don't atomize
 #
 set -euo pipefail
 
@@ -45,6 +49,17 @@ supports_multiple_files() {
     extended_supports_multiple_files "$tool"
 }
 
+# Check if a tool is second-tier
+is_second_tier_tool() {
+    local tool="$1"
+
+    # Check if tool is in SECOND_TIER_TOOLS
+    if [[ -n "${SECOND_TIER_TOOLS[$tool]+x}" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 # Check if a tool requires special atomization
 requires_special_atomization() {
     local tool="$1"
@@ -56,8 +71,11 @@ requires_special_atomization() {
             ;;
         unittest)
             # Only atomize unittest if second-tier tools are enabled
-            [[ "$enable_second_tier" -eq 1 ]] && return 0
-            return 1
+            if is_second_tier_tool "$tool"; then
+                [[ "$enable_second_tier" -eq 1 ]] && return 0
+                return 1
+            fi
+            return 0  # First-tier test runners always get special atomization
             ;;
         *)
             return 1
@@ -512,9 +530,19 @@ generate_pytest_atomic_commands() {
             continue
         fi
 
-        # Check if it's a file or directory
-        if [[ "$arg" != -* ]] && [[ -e "$arg" ]]; then
-            file_args+=("$arg")
+        # Check if it's a file, directory, or test specification
+        if [[ "$arg" != -* ]]; then
+            # Check for pytest :: syntax (file::class::method or file::function)
+            if [[ "$arg" == *"::"* ]]; then
+                # This is already a specific test selection, don't atomize
+                echo "ATOMIC:${original_cmd[*]}"
+                return
+            elif [[ -e "$arg" ]]; then
+                file_args+=("$arg")
+            else
+                # Might be a module name or other argument
+                non_file_args+=("$arg")
+            fi
         else
             non_file_args+=("$arg")
         fi
@@ -874,6 +902,17 @@ generate_atomic_commands() {
     local check_tool="$tool"
     if [[ -n "$actual_tool" ]]; then
         check_tool="$actual_tool"
+    fi
+
+    # CRITICAL SAFETY CHECK: Block second-tier tools if flag not set
+    local enable_second_tier="${ENABLE_SECOND_TIER:-0}"
+    if is_second_tier_tool "$check_tool" && [[ "$enable_second_tier" -ne 1 ]]; then
+        if [[ "${DEBUG:-0}" -eq 1 ]]; then
+            echo "DEBUG: Second-tier tool '$check_tool' blocked - --enable-second-tier not set" >&2
+        fi
+        # Don't atomize second-tier tools without explicit permission
+        echo "ATOMIC:${original_cmd[*]}"
+        return
     fi
 
     # Get atomization rules

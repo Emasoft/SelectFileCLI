@@ -726,8 +726,12 @@ get_tool_atomization_rules() {
             ;;
 
         # Second-tier tools with special atomization
-        unittest|nose2|behave|ward)
-            echo "test-function"  # Similar to pytest
+        unittest)
+            echo "test-function"  # Has implementation
+            ;;
+
+        nose2|behave|ward)
+            echo "no-atomize"  # SAFETY: No implementation yet, don't atomize
             ;;
 
         tox|nox|invoke)
