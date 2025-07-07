@@ -2163,6 +2163,9 @@ cleanup() {
 
 trap cleanup EXIT INT TERM
 
+# Add debug mode
+[[ "${DEBUG:-0}" -eq 1 ]] && set -x
+
 # Now handle queue management commands (functions are defined)
 if [[ -n "$QUEUE_COMMAND" ]]; then
     case "$QUEUE_COMMAND" in
@@ -2205,9 +2208,16 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
 
             # Check and enforce runner
             enforced_cmd=()
-            # Capture both output and exit code
-            enforce_output=$(enforce_runner "$COMMAND" "${ARGS[@]}" 2>&1)
-            enforce_result=$?
+            # Capture both output and exit code (only stdout, let stderr through)
+            # Use || true to prevent exit on non-zero return due to set -e
+            enforce_output=$(enforce_runner "$COMMAND" "${ARGS[@]}" || echo "EXIT:$?")
+            enforce_result=0
+
+            # Check if we got an exit code marker
+            if [[ "$enforce_output" =~ ^EXIT:([0-9]+)$ ]]; then
+                enforce_result="${BASH_REMATCH[1]}"
+                enforce_output=""
+            fi
 
             if [[ $enforce_result -eq 0 ]]; then
                 # Successfully enforced or no enforcement needed
