@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-detect_snapshot_tests.py - Detect which tests use snapshot testing
-Version: 1.0.0
+sep_detect_snapshot_tests.py - Detect which tests use snapshot testing
+Version: 8.6.0
 
-This script analyzes test files to detect which tests use snapshot testing
+This script is part of the Sequential Execution Pipeline (SEP) toolkit.
+It analyzes test files to detect which tests use snapshot testing
 (via snap_compare or other snapshot methods) to optimize test execution.
+
+CHANGELOG:
+v8.6.0:
+- Version bump for consistency across all SEP scripts
+- Added SEP prefix to filename in docstring
+- Added changelog
+- Part of SEP toolkit for intelligent pytest atomization
 """
 
 import ast
