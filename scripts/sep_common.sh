@@ -61,6 +61,11 @@ log_fail() {
     echo -e "${RED}✗${NC} $*" >&2
 }
 
+# Alias for backward compatibility
+log_warn() {
+    log_warning "$@"
+}
+
 # Check if a command exists
 command_exists() {
     command -v "$1" >/dev/null 2>&1

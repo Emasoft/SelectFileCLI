@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sep_queue.sh - Sequential Execution Pipeline Queue Manager
-# Version: 8.4.0
+# Version: 8.5.0
 #
 # This version implements the correct flow:
 # 1. Commands are added to queue (atomified if possible)
@@ -9,6 +9,12 @@
 # 4. All commands execute in exact order of addition
 #
 # HERE IS THE CHANGELOG FOR THIS VERSION OF THE FILE:
+# v8.5.0:
+# - Added runner enforcement by default (use --dont_enforce_runners to disable)
+# - Added --only_verified flag to skip unrecognized commands
+# - Added --enable-second-tier flag to enable less-trusted tools
+# - SEP is now uv-centric and enforces proper runners
+# - Only supported runners: uv, pipx, pnpm, go, npx
 # v8.4.0:
 # - Fixed USER variable conflict by renaming to RUN_USER throughout
 # - Added cross-platform date parsing function parse_date_to_epoch()
@@ -37,7 +43,7 @@
 #
 set -euo pipefail
 
-VERSION='8.4.0'
+VERSION='8.5.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -97,6 +103,9 @@ OPTIONS:
     --clear-queue          Clear all entries from queue (queue keeps running)
     --close-queue          Close queue (stop accepting new commands)
     --reopen-queue         Reopen closed queue (accept new commands again)
+    --dont_enforce_runners Do not enforce proper runners for tools
+    --only_verified        Skip unrecognized commands (log them)
+    --enable-second-tier   Enable second-tier tools (less trusted)
 
 GITHUB CLI COMPATIBLE COMMANDS:
     run list               List recent runs (identical to gh run list)
@@ -1296,6 +1305,9 @@ view_job() {
 # Parse command line options
 CUSTOM_LOG_DIR=""
 ATOMIFY="${ATOMIFY:-1}"  # Enable atomification by default
+ENFORCE_RUNNERS="${ENFORCE_RUNNERS:-1}"  # Enforce runners by default
+ONLY_VERIFIED="${ONLY_VERIFIED:-0}"  # Don't skip unrecognized by default
+ENABLE_SECOND_TIER="${ENABLE_SECOND_TIER:-0}"  # Disable second-tier by default
 PARSED_TIMEOUT=""
 PARSED_PIPELINE_TIMEOUT=""
 PARSED_MEMORY_LIMIT=""
@@ -1357,6 +1369,18 @@ while [[ $# -gt 0 ]]; do
             ;;
         --no-atomify)
             ATOMIFY=0
+            shift
+            ;;
+        --dont_enforce_runners)
+            ENFORCE_RUNNERS=0
+            shift
+            ;;
+        --only_verified)
+            ONLY_VERIFIED=1
+            shift
+            ;;
+        --enable-second-tier)
+            ENABLE_SECOND_TIER=1
             shift
             ;;
         run)
@@ -2169,6 +2193,40 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
 
     log INFO "Adding command to queue: $COMMAND ${ARGS[*]}"
     log INFO "Project: $PROJECT_ROOT"
+
+    # Export flags for tool config
+    export ENABLE_SECOND_TIER
+
+    # STEP 0: Enforce runners if enabled
+    if [[ $ENFORCE_RUNNERS -eq 1 ]]; then
+        # Source tool config for runner enforcement
+        if [[ -f "${SCRIPT_DIR}/sep_tool_config.sh" ]]; then
+            source "${SCRIPT_DIR}/sep_tool_config.sh"
+
+            # Check and enforce runner
+            local enforced_cmd=()
+            if mapfile -t enforced_cmd < <(enforce_runner "$COMMAND" "${ARGS[@]}"); then
+                # Successfully enforced or no enforcement needed
+                COMMAND="${enforced_cmd[0]}"
+                ARGS=("${enforced_cmd[@]:1}")
+                log INFO "Command after runner enforcement: $COMMAND ${ARGS[*]}"
+            else
+                local enforce_result=$?
+                if [[ $enforce_result -eq 2 ]]; then
+                    # Unsupported runner detected (poetry, conda, etc.)
+                    log WARN "Unsupported runner detected. SEP only supports: uv, pipx, pnpm, go, npx"
+                    log INFO "Running command as-is without atomification"
+                    ATOMIFY=0  # Disable atomification for unsupported runners
+                elif [[ $enforce_result -eq 1 ]] && [[ $ONLY_VERIFIED -eq 1 ]]; then
+                    # Unrecognized tool and --only_verified is set
+                    log WARN "Unrecognized tool '$COMMAND' - skipping due to --only_verified flag"
+                    echo "[SEQ-QUEUE] WARNING: Unrecognized tool '$COMMAND' - skipped"
+                    echo "[SEQ-QUEUE] To run anyway, remove --only_verified flag"
+                    exit 0
+                fi
+            fi
+        fi
+    fi
 
     # STEP 1: Check if command can be atomified
     if [[ $ATOMIFY -eq 1 ]]; then

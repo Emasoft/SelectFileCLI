@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # sep_installer.sh - Sequential Execution Pipeline Installation Manager
-# Version: 8.4.0
+# Version: 8.5.0
 #
 # This script consolidates:
 # - ensure-sequential.sh (setup verification)
 # - test-bash-compatibility.sh (compatibility testing)
 # - install-deps.sh (dependency management)
+#
+# SEP is uv-centric - requires uv for Python package management
 #
 # Usage:
 #   sep_installer.sh install  - Install and configure sequential execution pipeline
@@ -14,7 +16,7 @@
 #
 set -euo pipefail
 
-VERSION='8.4.0'
+VERSION='8.5.0'
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -29,7 +31,7 @@ init_sep_common
 # Display help message
 show_help() {
     cat << EOF
-sep_installer.sh v8.4.0 - Sequential Execution Pipeline Installation Manager
+sep_installer.sh v8.5.0 - Sequential Execution Pipeline Installation Manager
 
 USAGE:
     $SCRIPT_NAME install    Install and configure sequential pipeline
@@ -38,8 +40,15 @@ USAGE:
     $SCRIPT_NAME --help     Show this help message
     $SCRIPT_NAME --version  Show version information
 
+REQUIREMENTS:
+    SEP is uv-centric and requires:
+    - uv (Python package manager) - https://docs.astral.sh/uv/
+    - Python project with .venv created by uv
+    - Bash 3.2 or higher
+
 COMMANDS:
     install
+        - Checks for uv and .venv (required)
         - Creates ./scripts and ./logs directories
         - Installs system dependencies (jq, gawk, etc.)
         - Creates .env.development with default settings
@@ -57,6 +66,7 @@ COMMANDS:
         - Validates environment variables
         - Checks for old/deprecated scripts
         - Verifies script versions
+        - Detects direct sep.sh calls and suggests sep_queue.sh usage
         - Tests basic functionality
 
     uninstall
@@ -103,13 +113,13 @@ calculate_hash() {
 
 # Expected script versions and hashes
 declare -A EXPECTED_VERSIONS=(
-    ["sep.sh"]="8.4.0"
-    ["sep_queue.sh"]="8.4.0"
-    ["sep_memory_monitor.sh"]="8.4.0"
-    ["sep_monitor_queue.sh"]="8.4.0"
-    ["sep_kill_orphans.sh"]="8.4.0"
-    ["sep_installer.sh"]="8.4.0"
-    ["sep_tool_atomifier.sh"]="8.4.0"
+    ["sep.sh"]="8.5.0"
+    ["sep_queue.sh"]="8.5.0"
+    ["sep_memory_monitor.sh"]="8.5.0"
+    ["sep_monitor_queue.sh"]="8.5.0"
+    ["sep_kill_orphans.sh"]="8.5.0"
+    ["sep_installer.sh"]="8.5.0"
+    ["sep_tool_atomifier.sh"]="8.5.0"
     ["sep_common.sh"]="8.4.0"
     ["print_version.sh"]="1.0.0"
 )
@@ -176,6 +186,102 @@ check_command() {
 # =============================================================
 # INSTALL FUNCTIONS
 # =============================================================
+
+check_uv_environment() {
+    log_info "Checking uv environment..."
+
+    # Check if uv is installed
+    if ! check_command uv; then
+        log_error "uv not found!"
+        echo
+        echo "No uv managed project folder found. SEP requires uv to work."
+        echo "Do you want:"
+        echo "  1) Exit the install process and install uv and create the .venv with 'uv venv' yourself"
+        echo "  2) Let me initialize the project folder with 'uv init' and create the .venv with 'uv venv' for you"
+        echo
+        read -p "Your choice? (1, 2 or enter to exit): " choice
+
+        case "$choice" in
+            1)
+                echo
+                echo "Please install uv from: https://docs.astral.sh/uv/"
+                echo "Then run: uv venv"
+                echo "After that, run this installer again."
+                exit 0
+                ;;
+            2)
+                echo
+                log_info "Installing uv..."
+                curl -LsSf https://astral.sh/uv/install.sh | sh
+
+                # Source shell config to get uv in PATH
+                if [ -f "$HOME/.bashrc" ]; then
+                    source "$HOME/.bashrc"
+                elif [ -f "$HOME/.zshrc" ]; then
+                    source "$HOME/.zshrc"
+                fi
+
+                # Check if uv is now available
+                if ! check_command uv; then
+                    log_error "Failed to install uv. Please install manually."
+                    exit 1
+                fi
+
+                log_success "uv installed successfully"
+
+                # Initialize project if needed
+                if [ ! -f "$PROJECT_ROOT/pyproject.toml" ]; then
+                    log_info "Initializing uv project..."
+                    cd "$PROJECT_ROOT"
+                    uv init --name "$(basename "$PROJECT_ROOT")"
+                    log_success "Project initialized"
+                fi
+
+                # Create venv
+                log_info "Creating .venv..."
+                cd "$PROJECT_ROOT"
+                uv venv
+                log_success ".venv created"
+                ;;
+            *)
+                echo "Installation cancelled."
+                exit 0
+                ;;
+        esac
+    else
+        log_success "uv is installed"
+    fi
+
+    # Check if .venv exists
+    if [ ! -d "$PROJECT_ROOT/.venv" ]; then
+        log_warn ".venv not found"
+        echo
+        echo "SEP requires a uv-managed virtual environment."
+        echo "Do you want me to create it with 'uv venv'? (y/N)"
+        read -p "> " create_venv
+
+        if [[ "$create_venv" =~ ^[Yy]$ ]]; then
+            cd "$PROJECT_ROOT"
+            uv venv
+            log_success ".venv created"
+        else
+            echo "Please run 'uv venv' and try again."
+            exit 0
+        fi
+    else
+        log_success ".venv exists"
+    fi
+
+    # Verify it's a uv-managed venv
+    if [ -f "$PROJECT_ROOT/.venv/pyvenv.cfg" ]; then
+        if grep -q "uv" "$PROJECT_ROOT/.venv/pyvenv.cfg" 2>/dev/null; then
+            log_success ".venv is uv-managed"
+        else
+            log_warn ".venv exists but may not be uv-managed"
+            log_info "Consider recreating with: rm -rf .venv && uv venv"
+        fi
+    fi
+}
 
 install_dependencies() {
     local os_type=$(detect_os)
@@ -650,6 +756,166 @@ doctor_check_environment() {
     fi
 }
 
+doctor_check_direct_sep_calls() {
+    echo -e "\n${CYAN}=== Direct sep.sh Usage Detection ===${NC}"
+
+    local found_issues=0
+    local total_direct_calls=0
+
+    # Files to exclude from scanning (SEP's own scripts)
+    local exclude_patterns=(
+        "*/sep_*.sh"
+        "*/sep.sh"
+        "*/scripts/sep*"
+    )
+
+    # Function to check if a file should be excluded
+    should_exclude() {
+        local file="$1"
+        for pattern in "${exclude_patterns[@]}"; do
+            if [[ "$file" == $pattern ]]; then
+                return 0
+            fi
+        done
+        # Also exclude if it's in the SEP scripts directory
+        if [[ "$file" == "$SCRIPT_DIR"/* ]]; then
+            return 0
+        fi
+        return 1
+    }
+
+    # Function to scan a file for direct sep.sh calls
+    scan_file_for_sep_calls() {
+        local file="$1"
+        local file_type="$2"
+        local found_in_file=0
+
+        # Skip if file doesn't exist or is not readable
+        [[ ! -r "$file" ]] && return 0
+
+        # Skip if should be excluded
+        should_exclude "$file" && return 0
+
+        # Different patterns to search for based on file type
+        local patterns=(
+            "sep\.sh"
+            "\./sep\.sh"
+            "scripts/sep\.sh"
+            "\${.*}/sep\.sh"
+            "sep\.sh\s+--"
+        )
+
+        local line_num=0
+        while IFS= read -r line; do
+            ((line_num++))
+            for pattern in "${patterns[@]}"; do
+                if echo "$line" | grep -qE "$pattern" 2>/dev/null; then
+                    # Skip comments
+                    if [[ "$file_type" == "shell" ]] && [[ "$line" =~ ^[[:space:]]*# ]]; then
+                        continue
+                    fi
+                    if [[ "$file_type" == "yaml" ]] && [[ "$line" =~ ^[[:space:]]*# ]]; then
+                        continue
+                    fi
+
+                    if [[ $found_in_file -eq 0 ]]; then
+                        echo -e "\n${YELLOW}Found in $file:${NC}"
+                        found_in_file=1
+                        ((found_issues++))
+                    fi
+                    echo "  Line $line_num: $(echo "$line" | sed 's/^[[:space:]]*//' | head -c 80)"
+                    ((total_direct_calls++))
+                    break
+                fi
+            done
+        done < "$file"
+
+        return $found_in_file
+    }
+
+    # Scan shell scripts
+    echo -e "\n${BLUE}Scanning shell scripts...${NC}"
+    while IFS= read -r -d '' script; do
+        scan_file_for_sep_calls "$script" "shell"
+    done < <(find "$PROJECT_ROOT" -name "*.sh" -type f -print0 2>/dev/null)
+
+    # Scan Makefiles
+    echo -e "\n${BLUE}Scanning Makefiles...${NC}"
+    for makefile in "$PROJECT_ROOT/Makefile" "$PROJECT_ROOT/makefile" "$PROJECT_ROOT/GNUmakefile"; do
+        [[ -f "$makefile" ]] && scan_file_for_sep_calls "$makefile" "makefile"
+    done
+
+    # Scan GitHub workflows
+    echo -e "\n${BLUE}Scanning GitHub workflows...${NC}"
+    if [[ -d "$PROJECT_ROOT/.github/workflows" ]]; then
+        while IFS= read -r -d '' workflow; do
+            scan_file_for_sep_calls "$workflow" "yaml"
+        done < <(find "$PROJECT_ROOT/.github/workflows" -name "*.yml" -o -name "*.yaml" -type f -print0 2>/dev/null)
+    fi
+
+    # Scan git hooks
+    echo -e "\n${BLUE}Scanning git hooks...${NC}"
+    if [[ -d "$PROJECT_ROOT/.git/hooks" ]]; then
+        for hook in "$PROJECT_ROOT/.git/hooks"/*; do
+            if [[ -f "$hook" && -x "$hook" && ! "$hook" =~ \.sample$ ]]; then
+                scan_file_for_sep_calls "$hook" "shell"
+            fi
+        done
+    fi
+
+    # Scan package.json scripts
+    echo -e "\n${BLUE}Scanning package.json scripts...${NC}"
+    if [[ -f "$PROJECT_ROOT/package.json" ]]; then
+        if command -v jq >/dev/null 2>&1; then
+            local scripts=$(jq -r '.scripts | to_entries[] | "\(.key): \(.value)"' "$PROJECT_ROOT/package.json" 2>/dev/null || true)
+            if [[ -n "$scripts" ]]; then
+                local found_in_package=0
+                while IFS= read -r script_line; do
+                    if echo "$script_line" | grep -qE "sep\.sh|./sep\.sh|scripts/sep\.sh" 2>/dev/null; then
+                        if [[ $found_in_package -eq 0 ]]; then
+                            echo -e "\n${YELLOW}Found in package.json scripts:${NC}"
+                            found_in_package=1
+                            ((found_issues++))
+                        fi
+                        echo "  $script_line"
+                        ((total_direct_calls++))
+                    fi
+                done <<< "$scripts"
+            fi
+        else
+            log_warn "jq not installed - skipping package.json scan"
+        fi
+    fi
+
+    # Scan pre-commit configuration
+    echo -e "\n${BLUE}Scanning pre-commit configuration...${NC}"
+    if [[ -f "$PROJECT_ROOT/.pre-commit-config.yaml" ]]; then
+        scan_file_for_sep_calls "$PROJECT_ROOT/.pre-commit-config.yaml" "yaml"
+    fi
+
+    # Summary and recommendations
+    echo -e "\n${CYAN}=== Direct sep.sh Call Summary ===${NC}"
+    if [[ $found_issues -eq 0 ]]; then
+        log_success "No direct sep.sh calls found"
+    else
+        log_warn "Found $total_direct_calls direct sep.sh calls in $found_issues files"
+
+        echo -e "\n${CYAN}Recommendations:${NC}"
+        echo "1. Replace direct sep.sh calls with sep_queue.sh for better control"
+        echo "2. Use './sep' symlink instead of './scripts/sep_queue.sh' for convenience"
+        echo "3. For series of commands, batch them with sep_queue.sh:"
+        echo "   Example: sep_queue.sh -- ruff check && sep_queue.sh -- mypy && sep_queue.sh --queue-start"
+        echo "4. For git hooks, consider using sep_queue.sh with --queue-start"
+        echo "5. In CI/CD workflows, use sep_queue.sh for automatic atomification"
+
+        # Check for patterns that suggest batch usage
+        if [[ $total_direct_calls -gt 3 ]]; then
+            echo -e "\n${YELLOW}Note:${NC} Multiple sep.sh calls detected. Consider using sep_queue.sh"
+            echo "for better queue management and automatic command atomification."
+        fi
+    fi
+}
+
 doctor_test_functionality() {
     echo -e "\n${CYAN}=== Functionality Tests ===${NC}"
 
@@ -743,6 +1009,9 @@ main() {
             echo "Installing to: $PROJECT_ROOT"
             echo
 
+            # Check uv environment first (SEP is uv-centric)
+            check_uv_environment || exit 1
+
             # Run installation steps
             install_dependencies || exit 1
             create_directories
@@ -775,6 +1044,7 @@ main() {
             doctor_check_scripts
             doctor_check_dependencies
             doctor_check_environment
+            doctor_check_direct_sep_calls
             doctor_test_functionality
 
             echo

@@ -1,13 +1,105 @@
 #!/usr/bin/env bash
 # sep_tool_config.sh - Comprehensive tool configuration for atomification
-# Version: 8.4.0
+# Version: 8.5.0
 #
 # This script contains detailed configuration for all supported tools including:
 # - Command syntax patterns
 # - Ignore file formats and locations
 # - File extension mappings
 # - Special atomization rules
+# - Runner enforcement mappings
+# - Second-tier tool support
 #
+
+# Supported runners (SEP is uv-centric, these are the only allowed runners)
+readonly SUPPORTED_RUNNERS=(
+    "uv"      # UV - primary Python package manager
+    "pipx"    # Python application installer
+    "pnpm"    # Node.js package manager
+    "go"      # Go language runner
+    "npx"     # Node.js package executor
+)
+
+# Tool to runner mappings (enforced by default)
+declare -A TOOL_RUNNER_MAPPING=(
+    # Python tools - use uv by default
+    ["ruff"]="uv run"
+    ["mypy"]="uv run"
+    ["pytest"]="uv run"
+    ["pytest-cov"]="uv run"
+    ["coverage"]="uv run"
+    ["black"]="uv run"
+    ["isort"]="uv run"
+    ["docformatter"]="uv run"
+    ["nbqa"]="uv run"
+    ["pyupgrade"]="uv run"
+    ["deptry"]="uv run"
+    ["hypothesis"]="uv run"
+    ["syrupy"]="uv run"
+    ["pytest-watcher"]="uv run"
+    ["pytest-asyncio"]="uv run"
+    ["pytest-sugar"]="uv run"
+    ["pytest-mock"]="uv run"
+    ["mkdocs"]="uv run"
+    ["commitizen"]="uv run"
+    ["cz"]="uv run"
+
+    # Tools that should use pipx
+    ["pre-commit"]="pipx run"
+    ["uv-pre-commit"]="pipx run"
+
+    # JavaScript tools - use npx or pnpm
+    ["eslint"]="npx"
+    ["prettier"]="npx"
+    ["jsonlint"]="npx"
+
+    # Shell/system tools - no runner needed
+    ["shellcheck"]=""
+    ["yamllint"]=""
+    ["yamlfmt"]=""
+    ["actionlint"]=""
+    ["jq"]=""
+    ["gh"]=""
+    ["act"]=""
+    ["bfg"]=""
+    ["trufflehog"]=""
+    ["sqlfluff"]=""
+)
+
+# Second-tier tools (less trusted, enabled with --enable-second-tier)
+declare -A SECOND_TIER_TOOLS=(
+    # Python testing
+    ["unittest"]="uv run"
+    ["nose2"]="uv run"
+    ["tox"]="uv run"
+
+    # Security tools
+    ["gitleaks"]=""
+    ["bandit"]="uv run"
+    ["safety"]="uv run"
+    ["pip-audit"]="uv run"
+
+    # Code quality
+    ["vulture"]="uv run"
+    ["radon"]="uv run"
+    ["xenon"]="uv run"
+    ["prospector"]="uv run"
+    ["pylama"]="uv run"
+    ["pydocstyle"]="uv run"
+    ["darglint"]="uv run"
+
+    # Type checking
+    ["pyre"]="uv run"
+    ["pyright"]="npx"
+    ["pytype"]="uv run"
+
+    # Other development tools
+    ["invoke"]="uv run"
+    ["nox"]="uv run"
+    ["ward"]="uv run"
+    ["behave"]="uv run"
+    ["locust"]="uv run"
+)
 
 # Tool ignore file configurations
 declare -A TOOL_IGNORE_FILES=(
@@ -43,6 +135,30 @@ declare -A TOOL_IGNORE_FILES=(
 
     # Generic fallback
     ["*"]=".gitignore"
+
+    # Second-tier tools
+    ["unittest"]="pyproject.toml:setup.cfg:.gitignore"
+    ["nose2"]="nose2.cfg:pyproject.toml:.gitignore"
+    ["tox"]="tox.ini:pyproject.toml:.gitignore"
+    ["gitleaks"]=".gitleaks.toml:.gitignore"
+    ["bandit"]=".bandit:pyproject.toml:.gitignore"
+    ["safety"]="pyproject.toml:.gitignore"
+    ["pip-audit"]="pyproject.toml:.gitignore"
+    ["vulture"]="pyproject.toml:.gitignore"
+    ["radon"]="pyproject.toml:.gitignore"
+    ["xenon"]="pyproject.toml:.gitignore"
+    ["prospector"]=".prospector.yaml:pyproject.toml:.gitignore"
+    ["pylama"]="pylama.ini:pyproject.toml:.gitignore"
+    ["pydocstyle"]=".pydocstyle:pyproject.toml:.gitignore"
+    ["darglint"]=".darglint:pyproject.toml:.gitignore"
+    ["pyre"]=".pyre_configuration:pyproject.toml:.gitignore"
+    ["pyright"]="pyrightconfig.json:pyproject.toml:.gitignore"
+    ["pytype"]=".pytype.cfg:pyproject.toml:.gitignore"
+    ["invoke"]="invoke.yaml:tasks.py:.gitignore"
+    ["nox"]="noxfile.py:.gitignore"
+    ["ward"]="pyproject.toml:.gitignore"
+    ["behave"]=".behaverc:behave.ini:.gitignore"
+    ["locust"]="locust.conf:pyproject.toml:.gitignore"
 )
 
 # Tool-specific ignore patterns (in addition to ignore files)
@@ -453,6 +569,23 @@ get_extended_tool_extensions() {
             echo "*.yml *.yaml"
             ;;
 
+        # Second-tier Python tools
+        unittest|nose2|tox|bandit|safety|pip-audit|vulture|radon|\
+        xenon|prospector|pylama|pydocstyle|darglint|pyre|pytype|\
+        invoke|nox|ward|behave|locust)
+            echo "*.py *.pyi"
+            ;;
+
+        # Second-tier JS tools
+        pyright)
+            echo "*.py *.pyi *.js *.ts"
+            ;;
+
+        # Second-tier security tools
+        gitleaks)
+            echo "*"
+            ;;
+
         *)
             echo "*"
             ;;
@@ -478,6 +611,17 @@ extended_supports_multiple_files() {
         # Tools that work on whole project/directory
         pre-commit|uv-pre-commit|trufflehog|gh|act|bfg|\
         commitizen|cz-conventional-gitmoji|mkdocs)
+            return 1
+            ;;
+
+        # Second-tier tools that support multiple files
+        bandit|vulture|radon|xenon|pylama|pydocstyle|darglint)
+            return 0
+            ;;
+
+        # Second-tier tools that require single file
+        unittest|nose2|tox|gitleaks|safety|pip-audit|prospector|\
+        pyre|pyright|pytype|invoke|nox|ward|behave|locust)
             return 1
             ;;
 
@@ -508,8 +652,108 @@ get_tool_atomization_rules() {
         deptry)
             echo "directory"  # Dependency checking works on directories
             ;;
+
+        # Second-tier tools with special atomization
+        unittest|nose2|behave|ward)
+            echo "test-function"  # Similar to pytest
+            ;;
+
+        tox|nox|invoke)
+            echo "no-atomize"  # Task runners manage their own execution
+            ;;
+
+        gitleaks|safety|pip-audit)
+            echo "no-atomize"  # Security scanners work on whole project
+            ;;
+
         *)
             echo "file"  # Default to file-level atomization
             ;;
     esac
+}
+
+# Check if a runner is supported
+is_supported_runner() {
+    local runner="$1"
+    for supported in "${SUPPORTED_RUNNERS[@]}"; do
+        [[ "$runner" == "$supported" ]] && return 0
+    done
+    return 1
+}
+
+# Get the proper runner for a tool
+get_tool_runner() {
+    local tool="$1"
+    local enable_second_tier="${2:-0}"
+
+    # Check primary tools first
+    if [[ -n "${TOOL_RUNNER_MAPPING[$tool]}" ]]; then
+        echo "${TOOL_RUNNER_MAPPING[$tool]}"
+        return 0
+    fi
+
+    # Check second-tier tools if enabled
+    if [[ "$enable_second_tier" -eq 1 ]] && [[ -n "${SECOND_TIER_TOOLS[$tool]}" ]]; then
+        echo "${SECOND_TIER_TOOLS[$tool]}"
+        return 0
+    fi
+
+    # No runner mapping found
+    return 1
+}
+
+# Check if a tool is recognized (first or second tier)
+is_recognized_tool() {
+    local tool="$1"
+    local enable_second_tier="${2:-0}"
+
+    # Check primary tools
+    [[ -n "${TOOL_RUNNER_MAPPING[$tool]}" ]] && return 0
+
+    # Check second-tier tools if enabled
+    if [[ "$enable_second_tier" -eq 1 ]]; then
+        [[ -n "${SECOND_TIER_TOOLS[$tool]}" ]] && return 0
+    fi
+
+    return 1
+}
+
+# Enforce runner for a command
+enforce_runner() {
+    local cmd_array=("$@")
+    local tool="${cmd_array[0]}"
+    local enable_second_tier="${ENABLE_SECOND_TIER:-0}"
+
+    # Check if already using a runner
+    local runner_info
+    runner_info=$(detect_runner "${cmd_array[@]}")
+    local current_runner=$(echo "$runner_info" | cut -d'|' -f1)
+
+    # If already has a runner, check if it's supported
+    if [[ -n "$current_runner" ]]; then
+        if is_supported_runner "$current_runner"; then
+            # Supported runner, return as-is
+            printf '%s\n' "${cmd_array[@]}"
+            return 0
+        else
+            # Unsupported runner (e.g., poetry, conda), return error
+            return 2
+        fi
+    fi
+
+    # No runner, check if tool needs one
+    local proper_runner
+    if proper_runner=$(get_tool_runner "$tool" "$enable_second_tier"); then
+        if [[ -n "$proper_runner" ]]; then
+            # Add runner to command
+            echo "$proper_runner" "${cmd_array[@]}"
+        else
+            # Tool doesn't need a runner
+            printf '%s\n' "${cmd_array[@]}"
+        fi
+        return 0
+    fi
+
+    # Tool not recognized
+    return 1
 }

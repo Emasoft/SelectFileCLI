@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # sep_tool_atomifier.sh - Tool configuration and atomification logic
-# Version: 8.4.0
+# Version: 8.5.0
 #
 # This script contains the configuration and logic for atomifying commands
 # into individual file operations for sequential execution.
 #
 set -euo pipefail
 
-VERSION='8.4.0'
+VERSION='8.5.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -888,7 +888,7 @@ generate_atomic_commands() {
 # Display help message
 show_help() {
     cat << 'EOF'
-sep_tool_atomifier.sh v8.4.0 - Command atomification for sequential execution
+sep_tool_atomifier.sh v8.5.0 - Command atomification for sequential execution
 
 USAGE:
     sep_tool_atomifier.sh [OPTIONS] -- COMMAND [ARGS...]

@@ -7,7 +7,7 @@
 #
 set -euo pipefail
 
-VERSION='8.4.0'
+VERSION='8.5.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

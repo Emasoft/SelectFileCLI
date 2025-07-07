@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # sep_monitor_queue.sh - Monitor the sequential execution queue and system state
-# Version: 8.4.0
+# Version: 8.5.0
 #
 set -euo pipefail
 
-VERSION='8.4.0'
+VERSION='8.5.0'
 
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
