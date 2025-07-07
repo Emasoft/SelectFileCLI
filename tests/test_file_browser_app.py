@@ -1050,21 +1050,32 @@ class TestSortDialogAdditional:
             app = FileBrowserApp(str(test_dir))
 
             async with app.run_test() as pilot:
-                tree = app.query_one(CustomDirectoryTree)
+                await pilot.pause(0.1)
 
-                # Create mock node
-                from unittest.mock import Mock
+                # Expand the root node to load the files
+                tree = app.query_one(CustomDirectoryTree)
+                tree.root.expand()
+                await pilot.pause(0.2)  # Wait for expansion
+
+                # Find the subdir node
+                subdir_node = None
+                for child in tree.root.children:
+                    if child.data and hasattr(child.data, "path"):
+                        child_path = Path(child.data.path)
+                        if child_path.name == "subdir":
+                            subdir_node = child
+                            break
+
+                assert subdir_node is not None, "Could not find subdir node"
+
+                # Test the rendered label
                 from rich.style import Style
 
-                node = Mock()
-                node.data = Mock(path=str(subdir))
-                node.parent = Mock()
                 base_style = Style()
                 style = Style()
 
-                with patch.object(DirectoryTree, "render_label", return_value=Text("subdir")):
-                    label = tree.render_label(node, base_style, style)
-                    label_text = label.plain
+                label = tree.render_label(subdir_node, base_style, style)
+                label_text = label.plain
 
                 # Should contain directory name
                 assert "subdir" in label_text

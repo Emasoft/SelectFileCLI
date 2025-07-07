@@ -1523,24 +1523,10 @@ PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Lock and state files
-LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
+# Lock and state files - simple relative paths
+LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-./.sequential-locks}"
 LOCK_DIR="${LOCK_BASE_DIR}/seq-exec-${PROJECT_HASH}"
 LOCKFILE="${LOCK_DIR}/executor.lock"
-QUEUE_FILE="${LOCK_DIR}/queue.txt"
-CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
-PIPELINE_TIMEOUT_FILE="${LOCK_DIR}/pipeline_timeout.txt"
-PAUSE_FILE="${LOCK_DIR}/paused"
-RUNNING_FILE="${LOCK_DIR}/running"
-CLOSED_FILE="${LOCK_DIR}/closed"
-RUN_START_FILE="${LOCK_DIR}/run_start"
-RUNS_DIR="${LOGS_DIR}/runs"
-CURRENT_RUN_FILE="${LOCK_DIR}/current_run"
-
-# Ensure lock directory exists
-mkdir -p "$LOCK_DIR"
-mkdir -p "$RUNS_DIR"
-
 # Source .env.development if it exists
 if [ -f "${PROJECT_ROOT}/.env.development" ]; then
     set -a  # Export all variables
@@ -1554,13 +1540,24 @@ MEMORY_LIMIT_MB="${PARSED_MEMORY_LIMIT:-${MEMORY_LIMIT_MB:-$DEFAULT_MEMORY_LIMIT
 TIMEOUT="${PARSED_TIMEOUT:-${TIMEOUT:-$DEFAULT_TIMEOUT}}"
 VERBOSE="${PARSED_VERBOSE:-${VERBOSE:-0}}"
 
-# Create logs directory
-if [[ -n "$CUSTOM_LOG_DIR" ]]; then
-    LOGS_DIR="$CUSTOM_LOG_DIR"
-else
-    LOGS_DIR="${LOG_DIR:-${PROJECT_ROOT}/logs}"
-fi
+# Create logs directory - simple relative path
+LOGS_DIR="${CUSTOM_LOG_DIR:-./logs}"
 mkdir -p "$LOGS_DIR"
+
+# Now define paths that depend on LOGS_DIR
+QUEUE_FILE="${LOCK_DIR}/queue.txt"
+CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
+PIPELINE_TIMEOUT_FILE="${LOCK_DIR}/pipeline_timeout.txt"
+PAUSE_FILE="${LOCK_DIR}/paused"
+RUNNING_FILE="${LOCK_DIR}/running"
+CLOSED_FILE="${LOCK_DIR}/closed"
+RUN_START_FILE="${LOCK_DIR}/run_start"
+RUNS_DIR="${LOGS_DIR}/runs"
+CURRENT_RUN_FILE="${LOCK_DIR}/current_run"
+
+# Ensure lock directory exists
+mkdir -p "$LOCK_DIR"
+mkdir -p "$RUNS_DIR"
 EXEC_LOG="${LOGS_DIR}/sequential_queue_$(date '+%Y%m%d_%H%M%S')_$$.log"
 
 # Defer handling queue management commands until functions are defined
