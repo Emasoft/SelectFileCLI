@@ -1656,7 +1656,13 @@ TIMEOUT="${PARSED_TIMEOUT:-${TIMEOUT:-$DEFAULT_TIMEOUT}}"
 VERBOSE="${PARSED_VERBOSE:-${VERBOSE:-0}}"
 
 # Create logs directory - simple relative path
-LOGS_DIR="${CUSTOM_LOG_DIR:-./logs}"
+# In CI environments, ensure we use relative paths
+if [[ -n "${CI:-}" || -n "${GITHUB_ACTIONS:-}" ]]; then
+    # Force relative paths in CI
+    LOGS_DIR="./logs"
+else
+    LOGS_DIR="${CUSTOM_LOG_DIR:-./logs}"
+fi
 mkdir -p "$LOGS_DIR"
 
 # Now define paths that depend on LOGS_DIR

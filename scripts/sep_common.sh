@@ -13,16 +13,20 @@
 # Usage: source "${SCRIPT_DIR}/sep_common.sh"
 #
 
-# Version
-readonly SEP_COMMON_VERSION='8.6.0'
+# Version - check if already defined to avoid readonly errors when sourced multiple times
+if [[ -z "${SEP_COMMON_VERSION:-}" ]]; then
+    readonly SEP_COMMON_VERSION='8.6.0'
+fi
 
-# Color definitions
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly CYAN='\033[0;36m'
-readonly NC='\033[0m'  # No Color
+# Color definitions - check if already defined to avoid readonly errors
+if [[ -z "${RED:-}" ]]; then
+    readonly RED='\033[0;31m'
+    readonly GREEN='\033[0;32m'
+    readonly YELLOW='\033[1;33m'
+    readonly BLUE='\033[0;34m'
+    readonly CYAN='\033[0;36m'
+    readonly NC='\033[0m'  # No Color
+fi
 
 # Get project root directory
 get_project_root() {
