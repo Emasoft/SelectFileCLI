@@ -66,23 +66,20 @@ jobs:
         echo "=== Current Resource Limits ==="
         ulimit -a
 
-    - name: Queue and run pre-commit checks
+    - name: Run pre-commit checks
       run: |
         source .venv/bin/activate
         ./scripts/sep_queue.sh --timeout 7200 -- pre-commit run --all-files --show-diff-on-failure
-        ./scripts/sep_queue.sh --queue-start
 
-    - name: Queue and run tests sequentially
+    - name: Run tests sequentially
       run: |
         source .venv/bin/activate
         ./scripts/sep_queue.sh --timeout 7200 -- uv run pytest tests -v --tb=short
-        ./scripts/sep_queue.sh --queue-start
 
-    - name: Queue and run build
+    - name: Build project
       run: |
         source .venv/bin/activate
         ./scripts/sep_queue.sh --timeout 3600 -- uv build
-        ./scripts/sep_queue.sh --queue-start
 
     - name: Memory usage report
       if: always()

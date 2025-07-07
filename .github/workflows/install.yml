@@ -41,12 +41,12 @@ jobs:
     - name: Verify lock file is up to date
       run: |
         # Check if lock file needs updating
-        uv lock --check
+        ./scripts/sep_queue.sh --timeout 600 -- uv lock --check
 
     - name: Check dependencies with deptry
       run: |
         # Run deptry to check for dependency issues
-        uv run deptry .
+        ./scripts/sep_queue.sh --timeout 600 -- uv run deptry .
 
     - name: List installed packages
       run: |

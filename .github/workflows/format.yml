@@ -50,24 +50,24 @@ jobs:
     - name: Format Python code with ruff
       run: |
         if [[ "${{ inputs.check-only }}" == "true" ]]; then
-          uv run ruff format --check --line-length=320 src/ tests/ scripts/*.py
+          ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320 src/ tests/ scripts/*.py
         else
-          uv run ruff format --line-length=320 src/ tests/ scripts/*.py
+          ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --line-length=320 src/ tests/ scripts/*.py
         fi
 
     - name: Sort Python imports with isort
       run: |
         if [[ "${{ inputs.check-only }}" == "true" ]]; then
-          uv run isort --check-only --profile black --line-length 320 src/ tests/
+          ./scripts/sep_queue.sh --timeout 1800 -- uv run isort --check-only --profile black --line-length 320 src/ tests/
         else
-          uv run isort --profile black --line-length 320 src/ tests/
+          ./scripts/sep_queue.sh --timeout 1800 -- uv run isort --profile black --line-length 320 src/ tests/
         fi
 
     - name: Format YAML files
       if: inputs.check-only == false
       run: |
         # Format GitHub workflows only (configured for GitHub style)
-        yamlfmt -path .github/workflows
+        ./scripts/sep_queue.sh --timeout 600 -- yamlfmt -path .github/workflows
 
     - name: Format shell scripts
       if: inputs.check-only == false
@@ -75,7 +75,7 @@ jobs:
         # Format shell scripts
         export PATH="${HOME}/.local/bin:${PATH}"
         find scripts -name "*.sh" -type f | while read -r file; do
-          shfmt -w -i 4 -ci "$file"
+          ./scripts/sep_queue.sh --timeout 300 -- shfmt -w -i 4 -ci "$file"
         done
 
     - name: Check for changes
@@ -90,8 +90,10 @@ jobs:
 
     - name: Commit formatting changes
       if: inputs.check-only == false && steps.git-check.outputs.changes == 'true'
-      run: |
-        git config --local user.email "713559+Emasoft@users.noreply.github.com"
-        git config --local user.name "Emasoft"
-        git add -A
-        git commit -m "style: auto-format code files [skip ci]"
+      run: |-
+        ./scripts/sep_queue.sh --timeout 300 -- bash -c '
+          git config --local user.email "713559+Emasoft@users.noreply.github.com"
+          git config --local user.name "Emasoft"
+          git add -A
+          git commit -m "style: auto-format code files [skip ci]"
+        '

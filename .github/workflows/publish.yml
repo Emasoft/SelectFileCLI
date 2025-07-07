@@ -27,13 +27,13 @@ jobs:
         uv sync --locked
     - name: Check dependencies with deptry
       run: |
-        uv run deptry .
+        ./scripts/sep_queue.sh --timeout 600 -- uv run deptry .
     - name: Run tests
       run: |
-        uv run pytest --tb=short
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run pytest --tb=short
     - name: Build package
       run: |
-        uv build
+        ./scripts/sep_queue.sh --timeout 3600 -- uv build
     - name: Store distribution packages
       uses: actions/upload-artifact@v4
       with:

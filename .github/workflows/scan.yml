@@ -49,55 +49,57 @@ jobs:
     - name: Full formatting check
       run: |
         echo "=== Checking Python formatting ==="
-        uv run ruff format --check --line-length=320 .
+        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320 .
 
         echo "=== Checking import sorting ==="
-        uv run isort --check-only --profile black --line-length 320 .
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run isort --check-only --profile black --line-length 320 .
 
     - name: Full linting scan
       run: |
         echo "=== Running ruff on all Python files ==="
-        uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated .
+        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff check --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated .
 
         echo "=== Running mypy type checking ==="
-        uv run mypy --install-types --non-interactive .
+        ./scripts/sep_queue.sh --timeout 7200 -- uv run mypy --install-types --non-interactive .
 
         echo "=== Running deptry dependency check ==="
-        uv run deptry .
+        ./scripts/sep_queue.sh --timeout 3600 -- uv run deptry .
 
     - name: Code quality analysis
       run: |
         echo "=== Finding dead code with vulture ==="
-        uv run vulture . --min-confidence 80 || true
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run vulture . --min-confidence 80 || true
 
         echo "=== Analyzing code complexity ==="
-        uv run radon cc . -a -nb || true
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run radon cc . -a -nb || true
 
         echo "=== Analyzing maintainability index ==="
-        uv run radon mi . -nb || true
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run radon mi . -nb || true
 
     - name: Security scan
       run: |
         echo "=== Running TruffleHog for secrets ==="
-        docker run --rm -v $(pwd):/repo trufflesecurity/trufflehog:latest \
-          git file:///repo --only-verified --fail --no-update || true
+        ./scripts/sep_queue.sh --timeout 3600 -- bash -c "
+          docker run --rm -v $(pwd):/repo trufflesecurity/trufflehog:latest \
+            git file:///repo --only-verified --fail --no-update || true
+        "
 
         echo "=== Running safety check ==="
-        uv run safety check --json || true
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run safety check --json || true
 
         echo "=== Running pip-audit ==="
-        uv run pip-audit || true
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run pip-audit || true
 
     - name: YAML and GitHub Actions scan
       run: |
         echo "=== Linting YAML files ==="
-        uv run yamllint -c .yamllint .
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run yamllint -c .yamllint .
 
         echo "=== Checking YAML formatting ==="
         yamlfmt -path .github/workflows -dry-run || true
 
         echo "=== Linting GitHub Actions ==="
-        actionlint
+        ./scripts/sep_queue.sh --timeout 1800 -- actionlint
 
     - name: Shell script analysis
       run: |
@@ -105,13 +107,13 @@ jobs:
         find . -name "*.sh" -type f -not -path "./.venv/*" -not -path "./node_modules/*" | \
           while read -r script; do
             echo "Checking: $script"
-            shellcheck --severity=warning "$script" || true
+            ./scripts/sep_queue.sh --timeout 300 -- shellcheck --severity=warning "$script" || true
           done
 
     - name: Run all tests
       run: |
         echo "=== Running full test suite with coverage ==="
-        uv run pytest -v --cov=. --cov-report=term-missing --cov-report=html
+        ./scripts/sep_queue.sh --timeout 7200 -- uv run pytest -v --cov=. --cov-report=term-missing --cov-report=html
 
     - name: Generate scan report
       if: always()
