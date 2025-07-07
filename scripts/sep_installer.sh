@@ -120,7 +120,7 @@ declare -A EXPECTED_VERSIONS=(
     ["sep_kill_orphans.sh"]="8.5.0"
     ["sep_installer.sh"]="8.5.0"
     ["sep_tool_atomifier.sh"]="8.5.0"
-    ["sep_common.sh"]="8.4.0"
+    ["sep_common.sh"]="8.5.0"
     ["print_version.sh"]="1.0.0"
 )
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # sep_common.sh - Common functions and definitions for SEP scripts
-# Version: 8.4.0
+# Version: 8.5.0
 #
 # This file contains shared code used by multiple SEP (Sequential Execution Pipeline) scripts
 # to reduce duplication and improve maintainability.
@@ -9,7 +9,7 @@
 #
 
 # Version
-readonly SEP_COMMON_VERSION='8.4.0'
+readonly SEP_COMMON_VERSION='8.5.0'
 
 # Color definitions
 readonly RED='\033[0;31m'
