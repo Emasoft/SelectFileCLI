@@ -814,7 +814,7 @@ class TestSortDialogAdditional:
         async with app.run_test() as pilot:
             # Store original path
             original_path = app.current_path
-            
+
             # Try to change to non-existent directory
             # Note: _change_directory is synchronous, no await needed
             app._change_directory(Path("/this/does/not/exist"))

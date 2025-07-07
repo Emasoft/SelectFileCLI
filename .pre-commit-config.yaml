@@ -87,6 +87,14 @@ repos:
         files: '^\.github/workflows/.*\.(yml|yaml)$'
         require_serial: true
 
+      - id: check-workflow-execution
+        name: Check workflow command execution
+        entry: ./scripts/check_workflow_execution.sh
+        language: system
+        files: '^\.github/workflows/.*\.(yml|yaml)$'
+        pass_filenames: false
+        require_serial: true
+
 # CI configuration
 ci:
   skip:
