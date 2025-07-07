@@ -526,6 +526,28 @@ detect_runner() {
                 [[ "${#cmd_array[@]}" -gt 2 ]] && actual_tool="${cmd_array[2]}"
             fi
             ;;
+        pipx)
+            runner="pipx"
+            if [[ "${#cmd_array[@]}" -gt 1 ]] && [[ "${cmd_array[1]}" == "run" ]]; then
+                runner_end_idx=1
+                [[ "${#cmd_array[@]}" -gt 2 ]] && actual_tool="${cmd_array[2]}"
+            fi
+            ;;
+        go)
+            runner="go"
+            if [[ "${#cmd_array[@]}" -gt 1 ]] && [[ "${cmd_array[1]}" == "run" ]]; then
+                runner_end_idx=1
+                [[ "${#cmd_array[@]}" -gt 2 ]] && actual_tool="${cmd_array[2]}"
+            fi
+            ;;
+        poetry|conda|mamba|pdm|pip-run|pipenv)
+            # Unsupported runners
+            runner="${cmd_array[0]}"
+            if [[ "${#cmd_array[@]}" -gt 1 ]] && [[ "${cmd_array[1]}" == "run" ]]; then
+                runner_end_idx=1
+                [[ "${#cmd_array[@]}" -gt 2 ]] && actual_tool="${cmd_array[2]}"
+            fi
+            ;;
         *)
             # No runner detected
             actual_tool="${cmd_array[0]}"
