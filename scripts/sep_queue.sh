@@ -2205,27 +2205,31 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
 
             # Check and enforce runner
             enforced_cmd=()
-            if mapfile -t enforced_cmd < <(enforce_runner "$COMMAND" "${ARGS[@]}"); then
+            # Capture both output and exit code
+            enforce_output=$(enforce_runner "$COMMAND" "${ARGS[@]}" 2>&1)
+            enforce_result=$?
+
+            if [[ $enforce_result -eq 0 ]]; then
                 # Successfully enforced or no enforcement needed
-                if [[ ${#enforced_cmd[@]} -gt 0 ]]; then
-                    COMMAND="${enforced_cmd[0]}"
-                    ARGS=("${enforced_cmd[@]:1}")
-                    log INFO "Command after runner enforcement: $COMMAND ${ARGS[*]}"
+                if [[ -n "$enforce_output" ]]; then
+                    mapfile -t enforced_cmd <<< "$enforce_output"
+                    if [[ ${#enforced_cmd[@]} -gt 0 ]]; then
+                        COMMAND="${enforced_cmd[0]}"
+                        ARGS=("${enforced_cmd[@]:1}")
+                        log INFO "Command after runner enforcement: $COMMAND ${ARGS[*]}"
+                    fi
                 fi
-            else
-                enforce_result=$?
-                if [[ $enforce_result -eq 2 ]]; then
-                    # Unsupported runner detected (poetry, conda, etc.)
-                    log WARN "Unsupported runner detected. SEP only supports: uv, pipx, pnpm, go, npx"
-                    log INFO "Running command as-is without atomification"
-                    ATOMIFY=0  # Disable atomification for unsupported runners
-                elif [[ $enforce_result -eq 1 ]] && [[ $ONLY_VERIFIED -eq 1 ]]; then
-                    # Unrecognized tool and --only_verified is set
-                    log WARN "Unrecognized tool '$COMMAND' - skipping due to --only_verified flag"
-                    echo "[SEQ-QUEUE] WARNING: Unrecognized tool '$COMMAND' - skipped"
-                    echo "[SEQ-QUEUE] To run anyway, remove --only_verified flag"
-                    exit 0
-                fi
+            elif [[ $enforce_result -eq 2 ]]; then
+                # Unsupported runner detected (poetry, conda, etc.)
+                log WARN "Unsupported runner detected. SEP only supports: uv, pipx, pnpm, go, npx"
+                log INFO "Running command as-is without atomification"
+                ATOMIFY=0  # Disable atomification for unsupported runners
+            elif [[ $enforce_result -eq 1 ]] && [[ $ONLY_VERIFIED -eq 1 ]]; then
+                # Unrecognized tool and --only_verified is set
+                log WARN "Unrecognized tool '$COMMAND' - skipping due to --only_verified flag"
+                echo "[SEQ-QUEUE] WARNING: Unrecognized tool '$COMMAND' - skipped"
+                echo "[SEQ-QUEUE] To run anyway, remove --only_verified flag"
+                exit 0
             fi
         fi
     fi
