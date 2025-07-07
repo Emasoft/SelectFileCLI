@@ -2204,14 +2204,14 @@ if [[ -z "$QUEUE_COMMAND" ]]; then
             source "${SCRIPT_DIR}/sep_tool_config.sh"
 
             # Check and enforce runner
-            local enforced_cmd=()
+            enforced_cmd=()
             if mapfile -t enforced_cmd < <(enforce_runner "$COMMAND" "${ARGS[@]}"); then
                 # Successfully enforced or no enforcement needed
                 COMMAND="${enforced_cmd[0]}"
                 ARGS=("${enforced_cmd[@]:1}")
                 log INFO "Command after runner enforcement: $COMMAND ${ARGS[*]}"
             else
-                local enforce_result=$?
+                enforce_result=$?
                 if [[ $enforce_result -eq 2 ]]; then
                     # Unsupported runner detected (poetry, conda, etc.)
                     log WARN "Unsupported runner detected. SEP only supports: uv, pipx, pnpm, go, npx"
