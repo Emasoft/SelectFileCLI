@@ -18,7 +18,7 @@ jobs:
       run: uv python install ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        uv sync --all-extras --dev
+        uv sync --locked
     - name: Install actionlint
       run: |
         curl -s https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash
@@ -31,7 +31,7 @@ jobs:
         ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320
     - name: Type check with mypy
       run: |
-        ./scripts/sep_queue.sh --timeout 7200 -- uv run mypy --install-types --non-interactive src/selectfilecli || true
+        ./scripts/sep_queue.sh --timeout 7200 -- uv run mypy --install-types --non-interactive src/selectfilecli
     - name: Check dependencies with deptry
       run: |
         ./scripts/sep_queue.sh --timeout 3600 -- uv run deptry src

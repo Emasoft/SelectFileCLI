@@ -1,0 +1,65 @@
+# install.yml - Install dependencies deterministically from uv.lock and run deptry
+#
+# This workflow ensures all dependencies are installed from the lock file
+# and validates that all dependencies are properly declared.
+#
+name: Install Dependencies
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version to use'
+        required: false
+        default: '3.12'
+        type: string
+  workflow_dispatch:
+    inputs:
+      python-version:
+        description: 'Python version to use'
+        required: false
+        default: '3.12'
+        type: string
+
+jobs:
+  install:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python ${{ inputs.python-version }}
+      run: uv python install ${{ inputs.python-version }}
+
+    - name: Install dependencies from lock file
+      run: |
+        # Use --locked to ensure deterministic installation
+        uv sync --locked
+
+    - name: Verify lock file is up to date
+      run: |
+        # Check if lock file needs updating
+        ./scripts/sep_queue.sh --timeout 600 -- uv lock --check
+
+    - name: Check dependencies with deptry
+      run: |
+        # Run deptry to check for dependency issues
+        ./scripts/sep_queue.sh --timeout 600 -- uv run deptry .
+
+    - name: List installed packages
+      run: |
+        # Show what was installed
+        uv pip list
+
+    - name: Cache dependency information
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cache/uv
+          .venv
+        key: ${{ runner.os }}-uv-${{ inputs.python-version }}-${{ hashFiles('**/uv.lock') }}
+        restore-keys: |-
+          ${{ runner.os }}-uv-${{ inputs.python-version }}-
+          ${{ runner.os }}-uv-

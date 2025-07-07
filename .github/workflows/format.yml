@@ -1,0 +1,99 @@
+# format.yml - Format code files using various formatters
+#
+# This workflow formats Python, JavaScript, YAML, and other code files
+# using the appropriate formatters through the SEP pipeline.
+#
+name: Format Code
+
+on:
+  workflow_call:
+    inputs:
+      check-only:
+        description: 'Only check formatting without making changes'
+        required: false
+        default: true
+        type: boolean
+  workflow_dispatch:
+    inputs:
+      check-only:
+        description: 'Only check formatting without making changes'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Install dependencies
+      run: |
+        uv sync --locked
+
+    - name: Install formatting tools
+      run: |
+        # Install yamlfmt
+        go install github.com/google/yamlfmt/cmd/yamlfmt@latest
+
+        # Install shfmt for shell scripts
+        curl -sS https://webinstall.dev/shfmt | bash
+
+    - name: Format Python code with ruff
+      run: |
+        if [[ "${{ inputs.check-only }}" == "true" ]]; then
+          ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --check --line-length=320 src/ tests/ scripts/*.py
+        else
+          ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --line-length=320 src/ tests/ scripts/*.py
+        fi
+
+    - name: Sort Python imports with isort
+      run: |
+        if [[ "${{ inputs.check-only }}" == "true" ]]; then
+          ./scripts/sep_queue.sh --timeout 1800 -- uv run isort --check-only --profile black --line-length 320 src/ tests/
+        else
+          ./scripts/sep_queue.sh --timeout 1800 -- uv run isort --profile black --line-length 320 src/ tests/
+        fi
+
+    - name: Format YAML files
+      if: inputs.check-only == false
+      run: |
+        # Format GitHub workflows only (configured for GitHub style)
+        ./scripts/sep_queue.sh --timeout 600 -- yamlfmt -path .github/workflows
+
+    - name: Format shell scripts
+      if: inputs.check-only == false
+      run: |
+        # Format shell scripts
+        export PATH="${HOME}/.local/bin:${PATH}"
+        find scripts -name "*.sh" -type f | while read -r file; do
+          ./scripts/sep_queue.sh --timeout 300 -- shfmt -w -i 4 -ci "$file"
+        done
+
+    - name: Check for changes
+      if: inputs.check-only == false
+      id: git-check
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "changes=true" >> $GITHUB_OUTPUT
+        else
+          echo "changes=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Commit formatting changes
+      if: inputs.check-only == false && steps.git-check.outputs.changes == 'true'
+      run: |-
+        ./scripts/sep_queue.sh --timeout 300 -- bash -c '
+          git config --local user.email "713559+Emasoft@users.noreply.github.com"
+          git config --local user.name "Emasoft"
+          git add -A
+          git commit -m "style: auto-format code files [skip ci]"
+        '

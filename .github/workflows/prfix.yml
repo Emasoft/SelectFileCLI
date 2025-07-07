@@ -1,0 +1,129 @@
+# prfix.yml - Automatically fix pull request issues
+#
+# This workflow runs on pull requests and automatically fixes common issues
+# like formatting, import sorting, and simple linting problems.
+#
+name: PR Auto-Fix
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  auto-fix:
+    # Only run on PRs from the same repository (not forks)
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        token: ${{ secrets.GITHUB_TOKEN }}
+        fetch-depth: 0
+        ref: ${{ github.event.pull_request.head.ref }}
+
+    - name: Install uv
+      uses: astral-sh/setup-uv@v3
+
+    - name: Set up Python
+      run: uv python install 3.12
+
+    - name: Install dependencies
+      run: |
+        uv sync --locked
+
+    - name: Install additional tools
+      run: |
+        # Install yamlfmt
+        go install github.com/google/yamlfmt/cmd/yamlfmt@latest
+
+    - name: Fix Python formatting with ruff
+      run: |
+        # Format all Python files
+        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff format --line-length=320 .
+
+    - name: Fix Python linting issues with ruff
+      run: |
+        # Auto-fix safe linting issues
+        ./scripts/sep_queue.sh --timeout 3600 -- uv run ruff check --fix --ignore E203,E402,E501,E266,W505,F841,F842,F401,W293,I001,UP015,C901,W291 --isolated .
+
+    - name: Sort Python imports
+      run: |
+        # Sort imports consistently
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run isort --profile black --line-length 320 .
+
+    - name: Update Python syntax
+      run: |
+        # Upgrade Python syntax to modern versions
+        ./scripts/sep_queue.sh --timeout 1800 -- uv run pyupgrade --py310-plus $(find . -name "*.py" -type f)
+
+    - name: Fix trailing whitespace
+      run: |
+        # Remove trailing whitespace from all text files
+        find . -type f -name "*.py" -o -name "*.yml" -o -name "*.yaml" -o -name "*.sh" -o -name "*.md" | \
+          xargs -I {} sed -i 's/[[:space:]]*$//' {}
+
+    - name: Fix end of file newlines
+      run: |
+        # Ensure files end with a newline
+        find . -type f -name "*.py" -o -name "*.yml" -o -name "*.yaml" -o -name "*.sh" -o -name "*.md" | \
+          while read -r file; do
+            if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l)" -eq 0 ]; then
+              echo >> "$file"
+            fi
+          done
+
+    - name: Format YAML files
+      run: |
+        # Format GitHub workflows
+        ./scripts/sep_queue.sh --timeout 600 -- yamlfmt -path .github/workflows
+
+    - name: Check for changes
+      id: git-check
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "changes=true" >> $GITHUB_OUTPUT
+          # Generate change summary
+          echo "## Changes Made" > fix-summary.md
+          echo "" >> fix-summary.md
+          git diff --stat >> fix-summary.md
+        else
+          echo "changes=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Commit fixes
+      if: steps.git-check.outputs.changes == 'true'
+      run: |
+        ./scripts/sep_queue.sh --timeout 600 -- bash -c '
+          git config --local user.email "713559+Emasoft@users.noreply.github.com"
+          git config --local user.name "Emasoft"
+          git add -A
+          git commit -m "fix: auto-fix formatting and linting issues [skip ci]
+
+          Auto-fixed:
+          - Python formatting with ruff
+          - Import sorting with isort
+          - Safe linting fixes
+          - Trailing whitespace
+          - End of file newlines
+          - YAML formatting"
+          git push
+        '
+
+    - name: Comment on PR
+      if: steps.git-check.outputs.changes == 'true'
+      uses: actions/github-script@v7
+      with:
+        script: |-
+          const fs = require('fs');
+          const summary = fs.readFileSync('fix-summary.md', 'utf8');
+
+          github.rest.issues.createComment({
+            issue_number: context.issue.number,
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            body: `🤖 **Auto-fix Applied**\n\nI've automatically fixed formatting and linting issues in this PR.\n\n${summary}\n\nPlease pull the latest changes to your local branch.`
+          })

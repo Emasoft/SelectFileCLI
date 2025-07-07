@@ -41,7 +41,7 @@ jobs:
         python-version: '3.11'
 
     - name: Install uv
-      uses: astral-sh/setup-uv@v6
+      uses: astral-sh/setup-uv@v3
       with:
         enable-cache: true
 
@@ -51,7 +51,7 @@ jobs:
     - name: Install dependencies
       run: |
         source .venv/bin/activate
-        uv sync --all-extras
+        uv sync --locked
         uv pip install pre-commit
 
     - name: Set resource limits
