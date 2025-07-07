@@ -10,15 +10,6 @@ set -euo pipefail
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Helper function to add memory limit prefix if on Linux
-get_memory_limit_prefix() {
-    if [[ "$(uname)" == "Linux" ]]; then
-        echo "ulimit -v 4194304 && "
-    else
-        echo ""
-    fi
-}
-
 # Get file extensions for a given tool
 get_tool_extensions() {
     local tool="$1"
@@ -453,9 +444,7 @@ generate_pytest_atomic_commands() {
 
     # If -k flag is present, don't atomize (already selecting specific tests)
     if [[ $has_k_flag -eq 1 ]]; then
-        # Add memory limit for pytest (4GB virtual memory) - only on Linux
-        local mem_prefix=$(get_memory_limit_prefix)
-        echo "ATOMIC:${mem_prefix}${original_cmd[*]}"
+        echo "ATOMIC:${original_cmd[*]}"
         return
     fi
 
@@ -479,9 +468,7 @@ generate_pytest_atomic_commands() {
 
     # If no test files found, run as-is
     if [[ ${#test_files[@]} -eq 0 ]]; then
-        # Add memory limit for pytest (4GB virtual memory) - only on Linux
-        local mem_prefix=$(get_memory_limit_prefix)
-        echo "ATOMIC:${mem_prefix}${original_cmd[*]}"
+        echo "ATOMIC:${original_cmd[*]}"
         return
     fi
 
@@ -509,9 +496,7 @@ generate_pytest_atomic_commands() {
                 echo "DEBUG: Failed to extract test functions from $test_file" >&2
             fi
             # Fall back to running the whole file
-            # Add memory limit for pytest (4GB virtual memory) - only on Linux
-            local mem_prefix=$(get_memory_limit_prefix)
-            echo "ATOMIC:${mem_prefix}${non_file_args[*]} $test_file"
+            echo "ATOMIC:${non_file_args[*]} $test_file"
             continue
         fi
 
@@ -521,9 +506,7 @@ generate_pytest_atomic_commands() {
 
         if [[ ${#test_functions[@]} -eq 0 ]]; then
             # No test functions found, run the whole file
-            # Add memory limit for pytest (4GB virtual memory) - only on Linux
-            local mem_prefix=$(get_memory_limit_prefix)
-            echo "ATOMIC:${mem_prefix}${non_file_args[*]} $test_file"
+            echo "ATOMIC:${non_file_args[*]} $test_file"
         else
             # For tests with --snapshot-update, intelligently handle based on actual snapshot usage
             if [[ $has_snapshot_update -eq 1 ]]; then
@@ -585,9 +568,7 @@ generate_pytest_atomic_commands() {
                         ((batch_count++))
 
                         if [[ $batch_count -eq $batch_size ]]; then
-                            # Add memory limit for pytest (4GB virtual memory) - only on Linux
-                            local mem_prefix=$(get_memory_limit_prefix)
-                            echo "ATOMIC:${mem_prefix}${non_file_args[*]} $batch_tests"
+                            echo "ATOMIC:${non_file_args[*]} $batch_tests"
                             batch_count=0
                             batch_tests=""
                         fi
@@ -595,9 +576,7 @@ generate_pytest_atomic_commands() {
 
                     # Handle remaining snapshot tests
                     if [[ -n "$batch_tests" ]]; then
-                        # Add memory limit for pytest (4GB virtual memory) - only on Linux
-                        local mem_prefix=$(get_memory_limit_prefix)
-                        echo "ATOMIC:${mem_prefix}${non_file_args[*]} $batch_tests"
+                        echo "ATOMIC:${non_file_args[*]} $batch_tests"
                     fi
                 fi
 
@@ -612,9 +591,7 @@ generate_pytest_atomic_commands() {
                     done
 
                     for test_func in "${regular_test_funcs[@]}"; do
-                        # Add memory limit for pytest (4GB virtual memory) - only on Linux
-                        local mem_prefix=$(get_memory_limit_prefix)
-                        echo "ATOMIC:${mem_prefix}${cmd_without_snapshot[*]} $test_file::$test_func"
+                        echo "ATOMIC:${cmd_without_snapshot[*]} $test_file::$test_func"
                     done
                 fi
             else
@@ -640,9 +617,7 @@ generate_pytest_atomic_commands() {
                         done
 
                         if [[ $needs_snapshot -eq 1 ]]; then
-                            # Add memory limit for pytest (4GB virtual memory) - only on Linux
-                            local mem_prefix=$(get_memory_limit_prefix)
-                            echo "ATOMIC:${mem_prefix}${non_file_args[*]} $test_file::$test_func"
+                            echo "ATOMIC:${non_file_args[*]} $test_file::$test_func"
                         else
                             # Remove --snapshot-update for non-snapshot tests
                             local cmd_without_snapshot=()
@@ -651,20 +626,13 @@ generate_pytest_atomic_commands() {
                                     cmd_without_snapshot+=("$arg")
                                 fi
                             done
-                            # Add memory limit for pytest (4GB virtual memory) - only on Linux
-                            local mem_prefix=$(get_memory_limit_prefix)
-                            echo "ATOMIC:${mem_prefix}${cmd_without_snapshot[*]} $test_file::$test_func"
+                            echo "ATOMIC:${cmd_without_snapshot[*]} $test_file::$test_func"
                         fi
                     done
                 else
                     # No snapshot update requested, run normally
                     for test_func in "${test_functions[@]}"; do
-                        # Add memory limit for pytest (4GB virtual memory) - only on Linux
-                        if [[ "$(uname)" == "Linux" ]]; then
-                            echo "ATOMIC:ulimit -v 4194304 && ${non_file_args[*]} $test_file::$test_func"
-                        else
-                            echo "ATOMIC:${non_file_args[*]} $test_file::$test_func"
-                        fi
+                        echo "ATOMIC:${non_file_args[*]} $test_file::$test_func"
                     done
                 fi
             fi
