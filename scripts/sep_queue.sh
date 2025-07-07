@@ -984,12 +984,30 @@ view_runs() {
         # List recent runs
         local runs=()
         if [[ -d "$RUNS_DIR" ]]; then
-            # Get runs sorted by date (newest first)
-            for run_dir in $(ls -1t "$RUNS_DIR" 2>/dev/null | head -$INTERACTIVE_RUN_LIMIT); do
+            # Get runs sorted by date (newest first) using stat for modification time
+            local run_dirs=()
+            for run_path in "$RUNS_DIR"/*/; do
+                [[ -d "$run_path" ]] || continue
+                run_dir="${run_path%/}"
+                run_dir="${run_dir##*/}"
                 if [[ -f "${RUNS_DIR}/${run_dir}/metadata.txt" ]]; then
-                    runs+=("$run_dir")
+                    # Get modification time for sorting
+                    local mtime
+                    if [[ "$OSTYPE" == "darwin"* ]]; then
+                        mtime=$(stat -f "%m" "${RUNS_DIR}/${run_dir}" 2>/dev/null || echo 0)
+                    else
+                        mtime=$(stat -c "%Y" "${RUNS_DIR}/${run_dir}" 2>/dev/null || echo 0)
+                    fi
+                    run_dirs+=("$mtime:$run_dir")
                 fi
             done
+
+            # Sort by modification time (newest first) and limit
+            if [[ ${#run_dirs[@]} -gt 0 ]]; then
+                while IFS= read -r entry; do
+                    runs+=("${entry#*:}")
+                done < <(printf '%s\n' "${run_dirs[@]}" | sort -rn | head -$INTERACTIVE_RUN_LIMIT)
+            fi
         fi
 
         if [[ ${#runs[@]} -eq 0 ]]; then
@@ -1102,8 +1120,24 @@ view_run() {
     local failed_jobs=()
 
     if [[ -d "${RUNS_DIR}/${run_id}/jobs" ]]; then
-        for job_file in $(ls -1t "${RUNS_DIR}/${run_id}/jobs/"*.txt 2>/dev/null); do
-            ((job_count++)) || true
+        # Get job files sorted by modification time
+        local job_files=()
+        for job_file in "${RUNS_DIR}/${run_id}/jobs/"*.txt; do
+            [[ -f "$job_file" ]] || continue
+            local mtime
+            if [[ "$OSTYPE" == "darwin"* ]]; then
+                mtime=$(stat -f "%m" "$job_file" 2>/dev/null || echo 0)
+            else
+                mtime=$(stat -c "%Y" "$job_file" 2>/dev/null || echo 0)
+            fi
+            job_files+=("$mtime:$job_file")
+        done
+
+        # Sort by modification time (newest first)
+        if [[ ${#job_files[@]} -gt 0 ]]; then
+            while IFS= read -r entry; do
+                job_file="${entry#*:}"
+                ((job_count++)) || true
             # Read job metadata
             local job_id="" job_status="" job_command="" job_exit_code="" job_log_file=""
             while IFS='=' read -r key value; do
@@ -1139,7 +1173,8 @@ view_run() {
             if [[ "$verbose" == "true" ]] && [[ -n "$job_log_file" ]]; then
                 echo "    Log: $job_log_file"
             fi
-        done
+            done < <(printf '%s\n' "${job_files[@]}" | sort -rn)
+        fi
     fi
 
     if [[ $job_count -eq 0 ]]; then
@@ -1153,7 +1188,13 @@ view_run() {
         local run_log="${LOGS_DIR}/queue_run_${run_id}_${PID}.log"
         if [[ ! -f "$run_log" ]]; then
             # Try without PID
-            run_log=$(ls -1 "${LOGS_DIR}/queue_run_${run_id}_"*.log 2>/dev/null | head -1 || echo "")
+            # Find first matching log file using glob
+            local log_files=("${LOGS_DIR}/queue_run_${run_id}_"*.log)
+            if [[ -f "${log_files[0]}" ]]; then
+                run_log="${log_files[0]}"
+            else
+                run_log=""
+            fi
         fi
 
         if [[ -f "$run_log" ]]; then
@@ -1195,8 +1236,10 @@ view_job() {
 
     # Find job in any run
     local job_meta_file=""
-    for run_dir in $(ls -1 "$RUNS_DIR" 2>/dev/null); do
-        local test_file="${RUNS_DIR}/${run_dir}/jobs/${job_id}.txt"
+    # Use glob to find job file in any run directory
+    for run_path in "$RUNS_DIR"/*/; do
+        [[ -d "$run_path" ]] || continue
+        local test_file="${run_path}jobs/${job_id}.txt"
         if [[ -f "$test_file" ]]; then
             job_meta_file="$test_file"
             break

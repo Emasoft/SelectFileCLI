@@ -103,13 +103,28 @@ calculate_hash() {
 
 # Expected script versions and hashes
 declare -A EXPECTED_VERSIONS=(
+    ["sep.sh"]="8.4.0"
     ["sep_queue.sh"]="8.4.0"
-    ["sep_wait_all.sh"]="8.4.0"
     ["sep_memory_monitor.sh"]="8.4.0"
     ["sep_monitor_queue.sh"]="8.4.0"
     ["sep_kill_orphans.sh"]="8.4.0"
     ["sep_installer.sh"]="8.4.0"
     ["sep_tool_atomifier.sh"]="8.4.0"
+    ["sep_common.sh"]="8.4.0"
+    ["print_version.sh"]="1.0.0"
+)
+
+# Expected script SHA256 hashes (update these after any script changes)
+declare -A EXPECTED_HASHES=(
+    ["sep.sh"]="4a75a1c1c1838ba563737cae5a7b5be1ace62d73675f8549634807d4dbc6a3f5"
+    ["sep_queue.sh"]="902b9ac5c1d27fa89dfc22b3805f1f45112c02d8a28dd3f848c4f7e4f2734635"
+    ["sep_memory_monitor.sh"]="834a9fa62ca66210de144848980f30e879b8d8b58b301b23b62b9757cf5bca02"
+    ["sep_monitor_queue.sh"]="12d3ce55cb67b91cdc8aae1904fc856bf432b51be7a31ceb4b245abb9c3005a6"
+    ["sep_kill_orphans.sh"]="a9a9ca83e6e1ad9d461c1a7339a69c2757e4f1d98b9f8019ff18448af58facb8"
+    ["sep_installer.sh"]="SELF"  # Will be calculated at runtime
+    ["sep_tool_atomifier.sh"]="65bf62fbb73052f9a990fb0393adfbea677475fbef431585a7a9f961e868e573"
+    ["sep_common.sh"]="955876ff9cca73900e4c60a5ea92178eeb5288ce49b5da4929e9fa08df1481ea"
+    ["print_version.sh"]="216c1143d98589d73327c091b3ae41becc8d12653aa055ad6e0b0f819621479a"
 )
 
 # Logging functions are now defined in sep_common.sh
@@ -242,10 +257,10 @@ create_directories() {
         log_success "Created sequential locks directory"
     fi
 
-    # Create wait_all.sh lock file
+    # Create sep.sh lock file
     if [ ! -f "$PROJECT_ROOT/.sep.log.lock" ]; then
         touch "$PROJECT_ROOT/.sep.log.lock"
-        log_success "Created sep_wait_all.sh log lock file"
+        log_success "Created sep.sh log lock file"
     fi
 }
 
@@ -276,8 +291,8 @@ VERBOSE=0               # Set to 1 for verbose output
 # Lock directory configuration (relative paths)
 SEQUENTIAL_LOCK_BASE_DIR="./.sequential-locks"  # Project-local locks
 
-# sep_wait_all.sh lock configuration (relative paths)
-WAIT_ALL_LOG_LOCK="./.sep.log.lock"  # Lock file for sep_wait_all.sh logging
+# sep.sh lock configuration (relative paths)
+WAIT_ALL_LOG_LOCK="./.sep.log.lock"  # Lock file for sep.sh logging
 
 # Python/pytest configuration
 PYTEST_MAX_WORKERS=1    # Force sequential pytest
@@ -440,13 +455,15 @@ doctor_check_scripts() {
     echo -e "\n${CYAN}=== Script Verification ===${NC}"
 
     local required_scripts=(
-        "sep_wait_all.sh"
+        "sep.sh"
         "sep_queue.sh"
         "sep_memory_monitor.sh"
         "sep_monitor_queue.sh"
         "sep_kill_orphans.sh"
         "sep_installer.sh"
         "sep_tool_atomifier.sh"
+        "sep_common.sh"
+        "print_version.sh"
     )
 
     local all_good=true
@@ -465,9 +482,22 @@ doctor_check_scripts() {
                     all_good=false
                 fi
 
-                # Calculate and show hash for security
-                local hash=$(calculate_hash "$SCRIPT_DIR/$script" | cut -c1-12)
-                echo "     Hash: ${hash}..."
+                # Calculate and verify hash for security
+                local full_hash=$(calculate_hash "$SCRIPT_DIR/$script")
+                local expected_hash="${EXPECTED_HASHES[$script]}"
+
+                if [[ "$expected_hash" == "SELF" && "$script" == "sep_installer.sh" ]]; then
+                    # Skip hash verification for installer itself
+                    echo "     Hash: ${full_hash:0:12}... (self)"
+                elif [[ "$full_hash" == "$expected_hash" ]]; then
+                    echo "     Hash: ${full_hash:0:12}... ✓"
+                elif [[ "$full_hash" == "unknown" ]]; then
+                    echo "     Hash: Unable to calculate"
+                else
+                    echo "     Hash: ${full_hash:0:12}... ${RED}✗ MISMATCH${NC}"
+                    echo "     Expected: ${expected_hash:0:12}..."
+                    all_good=false
+                fi
             else
                 log_fail "$script not executable"
                 all_good=false
@@ -491,12 +521,12 @@ doctor_check_scripts() {
         "sequential_exec.sh"
         "sequential_queue.sh"
         "wait_all.sh"
+        "sep_wait_all.sh"
         "memory_monitor.sh"
         "monitor-queue.sh"
         "kill-orphans.sh"
         "install_sequential.sh"
         "tool_atomifier.sh"
-        "detect_snapshot_tests.py"
     )
 
     for script in "${deprecated[@]}"; do
@@ -623,12 +653,12 @@ doctor_check_environment() {
 doctor_test_functionality() {
     echo -e "\n${CYAN}=== Functionality Tests ===${NC}"
 
-    # Test sep_wait_all.sh
-    if [ -x "$SCRIPT_DIR/sep_wait_all.sh" ]; then
-        if "$SCRIPT_DIR/sep_wait_all.sh" -- echo "test" >/dev/null 2>&1; then
-            log_success "sep_wait_all.sh basic test passed"
+    # Test sep.sh
+    if [ -x "$SCRIPT_DIR/sep.sh" ]; then
+        if "$SCRIPT_DIR/sep.sh" -- echo "test" >/dev/null 2>&1; then
+            log_success "sep.sh basic test passed"
         else
-            log_fail "sep_wait_all.sh basic test failed"
+            log_fail "sep.sh basic test failed"
         fi
     fi
 
