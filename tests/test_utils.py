@@ -16,9 +16,9 @@ def get_sequential_executor() -> Optional[Path]:
     # Try to find the sequential executor
     project_root = Path(__file__).parent.parent
     sequential_executor = project_root / "scripts" / "sequential-executor.sh"
-    wait_all = project_root / "scripts" / "wait_all.sh"
+    sep = project_root / "scripts" / "sep.sh"
 
-    if sequential_executor.exists() and wait_all.exists():
+    if sequential_executor.exists() and sep.exists():
         return sequential_executor
     return None
 
@@ -38,11 +38,11 @@ def run_command_sequential(cmd: List[str], cwd: Optional[Path] = None, timeout: 
     """
     # Check if we should use sequential execution
     sequential_executor = get_sequential_executor()
-    wait_all = Path(__file__).parent.parent / "scripts" / "wait_all.sh"
+    sep = Path(__file__).parent.parent / "scripts" / "sep.sh"
 
-    if use_sequential and sequential_executor and wait_all.exists():
-        # Use wait_all.sh with sequential executor
-        full_cmd = [str(wait_all), "--timeout", str(timeout), "--", str(sequential_executor)] + cmd
+    if use_sequential and sequential_executor and sep.exists():
+        # Use sep.sh with sequential executor
+        full_cmd = [str(sep), "--timeout", str(timeout), "--", str(sequential_executor)] + cmd
     else:
         # Direct execution (fallback)
         full_cmd = cmd

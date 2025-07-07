@@ -37,7 +37,7 @@ PROCESSES CHECKED:
     - uv run commands
     - pre-commit hooks
     - ruff, mypy linters
-    - sep_queue, sep_wait_all, sep_memory_monitor
+    - sep_queue, sep, sep_memory_monitor
 
 LOCK CLEANUP:
     Removes stale locks from:
@@ -95,7 +95,7 @@ PATTERNS=(
     "ruff"
     "mypy"
     "sep_queue"
-    "sep_wait_all"
+    "sep"
     "sep_memory_monitor"
 )
 

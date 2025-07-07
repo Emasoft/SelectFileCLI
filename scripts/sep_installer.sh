@@ -269,8 +269,8 @@ create_directories() {
     fi
 
     # Create wait_all.sh lock file
-    if [ ! -f "$PROJECT_ROOT/.wait_all.log.lock" ]; then
-        touch "$PROJECT_ROOT/.wait_all.log.lock"
+    if [ ! -f "$PROJECT_ROOT/.sep.log.lock" ]; then
+        touch "$PROJECT_ROOT/.sep.log.lock"
         log_success "Created sep_wait_all.sh log lock file"
     fi
 }
@@ -303,7 +303,7 @@ VERBOSE=0               # Set to 1 for verbose output
 SEQUENTIAL_LOCK_BASE_DIR="./.sequential-locks"  # Project-local locks
 
 # sep_wait_all.sh lock configuration (relative paths)
-WAIT_ALL_LOG_LOCK="./.wait_all.log.lock"  # Lock file for sep_wait_all.sh logging
+WAIT_ALL_LOG_LOCK="./.sep.log.lock"  # Lock file for sep_wait_all.sh logging
 
 # Python/pytest configuration
 PYTEST_MAX_WORKERS=1    # Force sequential pytest
@@ -330,7 +330,7 @@ logs/
 .env.development
 .env.local
 .sequential-locks/
-.wait_all.log.lock
+.sep.log.lock
 
 # Private documentation
 CLAUDE.md
@@ -631,10 +631,10 @@ doctor_check_environment() {
 
     # Check lock files
     echo -e "\n${BLUE}Lock files:${NC}"
-    if [ -f "$PROJECT_ROOT/.wait_all.log.lock" ]; then
-        log_success ".wait_all.log.lock exists"
+    if [ -f "$PROJECT_ROOT/.sep.log.lock" ]; then
+        log_success ".sep.log.lock exists"
     else
-        log_fail ".wait_all.log.lock missing"
+        log_fail ".sep.log.lock missing"
     fi
 
     # Check symlinks

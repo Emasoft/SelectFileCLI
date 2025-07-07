@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# sep_wait_all.sh — Execute a command, wait for every descendant, with timeout,
+# sep.sh — Execute a command, wait for every descendant, with timeout,
 #                   retries, JSON/log output, per-process memory tracking, and
 #                   *automatic runner selection*.
 #
@@ -27,7 +27,7 @@
 #
 #  --log <file>
 #        Write the detailed run log to <file>.  Defaults to
-#        ./logs/sep_wait_all_<UTC-timestamp>.log (directory auto-created).
+#        ./logs/sep_<UTC-timestamp>.log (directory auto-created).
 #
 #  --json
 #        Print a structured JSON object instead of raw stdout/stderr.  If
@@ -134,7 +134,7 @@ VERSION='8.4.0'
 # ───────────────────────── Strict-mode & traps ───────────────────────────
 set -Eeuo pipefail
 
-SCRIPT_NAME="sep_wait_all.sh"
+SCRIPT_NAME="sep.sh"
 printf '\n%s v%s\n' "$SCRIPT_NAME" "$VERSION" >&2
 
 # ──────────────────────────── Help screen ────────────────────────────────
@@ -166,7 +166,7 @@ OPTIONS
 
   --log <file>
         Write the detailed run log to <file>.  Defaults to
-        ./logs/sep_wait_all_<UTC-timestamp>.log (directory auto-created).
+        ./logs/sep_<UTC-timestamp>.log (directory auto-created).
 
   --json
         Print a structured JSON object instead of raw stdout/stderr.  If
@@ -331,8 +331,8 @@ fi
 
 SLEEP_DELAY=${SLEEP_DELAY:-0.2}    # fractional sleep; adjust for portability
 # Logging files
-LOG_FILE=${LOG_FILE:-"$PROJECT_ROOT/wait_all.log"}
-LOG_LOCK_FILE=${LOG_LOCK_FILE:-${WAIT_ALL_LOG_LOCK:-"$PROJECT_ROOT/.wait_all.log.lock"}}
+LOG_FILE=${LOG_FILE:-"$PROJECT_ROOT/sep.log"}
+LOG_LOCK_FILE=${LOG_LOCK_FILE:-${WAIT_ALL_LOG_LOCK:-"$PROJECT_ROOT/.sep.log.lock"}}
 touch "$LOG_FILE" "$LOG_LOCK_FILE" 2>/dev/null || true
 
 # JSON logging flag

@@ -1875,15 +1875,15 @@ EOF
         monitor_pid=$!
     fi
 
-    # Ensure sep_wait_all.sh is available
-    if [ ! -x "${SCRIPT_DIR}/sep_wait_all.sh" ]; then
-        log ERROR "sep_wait_all.sh not found at: ${SCRIPT_DIR}/sep_wait_all.sh"
-        log ERROR "This script requires sep_wait_all.sh for atomic execution"
+    # Ensure sep.sh is available
+    if [ ! -x "${SCRIPT_DIR}/sep.sh" ]; then
+        log ERROR "sep.sh not found at: ${SCRIPT_DIR}/sep.sh"
+        log ERROR "This script requires sep.sh for atomic execution"
         return 1
     fi
 
-    # Execute through sep_wait_all.sh with job ID
-    JOB_ID="$job_id" "${SCRIPT_DIR}/sep_wait_all.sh" --timeout "$TIMEOUT" -- "$command" "${args[@]}"
+    # Execute through sep.sh with job ID
+    JOB_ID="$job_id" "${SCRIPT_DIR}/sep.sh" --timeout "$TIMEOUT" -- "$command" "${args[@]}"
     local exit_code=$?
 
     # Stop memory monitor
@@ -1903,16 +1903,16 @@ EOF
                 echo "END_TIME=$job_end" >> "$job_meta_file"
                 echo "EXIT_CODE=$exit_code" >> "$job_meta_file"
 
-                # Link to wait_all log if it exists
-                local wait_all_log="${LOGS_DIR}/wait_all_${job_id}.log"
-                if [[ -f "$wait_all_log" ]]; then
-                    echo "LOG_FILE=$wait_all_log" >> "$job_meta_file"
+                # Link to sep log if it exists
+                local sep_log="${LOGS_DIR}/sep_${job_id}.log"
+                if [[ -f "$sep_log" ]]; then
+                    echo "LOG_FILE=$sep_log" >> "$job_meta_file"
 
                     # Parse pytest results if this was a pytest command
                     if [[ "$command" == "pytest" ]] || [[ "$cmd_string" =~ pytest ]]; then
                         local results_file="${RUNS_DIR}/${run_id}/jobs/${job_id}_pytest_results.json"
                         if [[ -x "${SCRIPT_DIR}/parse_pytest_results.sh" ]]; then
-                            "${SCRIPT_DIR}/parse_pytest_results.sh" "$wait_all_log" "$results_file" >/dev/null 2>&1 || true
+                            "${SCRIPT_DIR}/parse_pytest_results.sh" "$sep_log" "$results_file" >/dev/null 2>&1 || true
                             if [[ -f "$results_file" ]]; then
                                 echo "PYTEST_RESULTS=$results_file" >> "$job_meta_file"
 
@@ -1942,11 +1942,11 @@ with open('$results_file') as f:
                                 fi
 
                                 # Also print to job log
-                                echo "" >> "$wait_all_log"
-                                echo "=== TEST RESULTS ===" >> "$wait_all_log"
-                                echo "PASSED: $passed" >> "$wait_all_log"
-                                echo "FAILED: $failed" >> "$wait_all_log"
-                                echo "TOTAL: $total" >> "$wait_all_log"
+                                echo "" >> "$sep_log"
+                                echo "=== TEST RESULTS ===" >> "$sep_log"
+                                echo "PASSED: $passed" >> "$sep_log"
+                                echo "FAILED: $failed" >> "$sep_log"
+                                echo "TOTAL: $total" >> "$sep_log"
                             fi
                         fi
                     fi
