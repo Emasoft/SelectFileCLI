@@ -39,6 +39,15 @@ set -euo pipefail
 
 VERSION='8.4.0'
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
+
+# Initialize common variables
+init_sep_common
+
 # Constants
 readonly DEFAULT_LIST_LIMIT=20
 readonly DEFAULT_WATCH_INTERVAL=3
@@ -1577,12 +1586,7 @@ COMMAND="${1:-}"
 shift || true
 ARGS=("$@")
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+# Colors are now defined in sep_common.sh
 
 # Logging functions
 log() {

@@ -9,28 +9,27 @@ set -euo pipefail
 
 VERSION='8.4.0'
 
-# Reverses the order of lines (cross-platform alternative to tac)
-reverse_lines() {
-    awk '{a[i++]=$0} END {for (j=i-1; j>=0;) print a[j--]}'
-}
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
+
+# Initialize common variables
+init_sep_common
 
 # Configuration
 MEMORY_LIMIT_MB=${MEMORY_LIMIT_MB:-2048}  # 2GB default
 CHECK_INTERVAL=${CHECK_INTERVAL:-5}       # Check every 5 seconds
 MONITOR_PID_FILE="/tmp/sep_memory_monitor_$$.pid"
 
-# Get project root
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# PROJECT_ROOT is now set by init_sep_common
 
 # LOG_FILE will be set after argument parsing
 
-# Colors
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-GREEN='\033[0;32m'
-NC='\033[0m'
+# Colors are now defined in sep_common.sh
 
-# Log functions - write to both stdout/stderr and log file
+# Log functions - override to write to both stdout/stderr and log file
 log_info() {
     local msg
     msg="[MEMORY-MONITOR] $(date '+%Y-%m-%d %H:%M:%S') - $*"
@@ -65,34 +64,7 @@ trap cleanup EXIT
 # Write our PID
 echo $$ > "$MONITOR_PID_FILE"
 
-# Get memory usage in MB for a process
-get_memory_mb() {
-    local pid=$1
-    if [[ "$OSTYPE" == "darwin"* ]]; then
-        # macOS: ps reports RSS in KB
-        ps -p "$pid" -o rss= 2>/dev/null | awk '{print int($1/1024)}' || echo 0
-    else
-        # Linux: ps reports RSS in KB
-        ps -p "$pid" -o rss= 2>/dev/null | awk '{print int($1/1024)}' || echo 0
-    fi
-}
-
-# Get all descendant PIDs of a process
-get_descendants() {
-    local parent_pid=$1
-    local children=""
-
-    if command -v pgrep >/dev/null 2>&1; then
-        children=$(pgrep -P "$parent_pid" 2>/dev/null || true)
-    else
-        children=$(ps --ppid "$parent_pid" -o pid= 2>/dev/null || true)
-    fi
-
-    for child in $children; do
-        echo "$child"
-        get_descendants "$child"
-    done
-}
+# get_memory_mb and get_descendants are now defined in sep_common.sh
 
 # Kill process tree
 kill_process_tree() {

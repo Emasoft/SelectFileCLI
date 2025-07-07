@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# kill-orphans.sh - Clean up orphaned processes and stale locks
+# sep_kill_orphans.sh - Clean up orphaned processes and stale locks
 # Version: 8.4.0
 #
 # This script finds and terminates processes that have been orphaned (parent PID = 1)
 # and removes stale lock files from the sequential execution system.
 #
-# Usage: ./kill-orphans.sh [--dry-run | --help]
+# Usage: ./sep_kill_orphans.sh [--dry-run | --help]
 #
 # Options:
 #   --dry-run    Show what would be killed without actually killing
@@ -15,13 +15,22 @@ set -euo pipefail
 
 VERSION='8.4.0'
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
+
+# Initialize common variables
+init_sep_common
+
 # Display help message
 show_help() {
     cat << 'EOF'
-kill-orphans.sh v8.4.0 - Emergency cleanup for orphaned processes
+sep_kill_orphans.sh v8.4.0 - Emergency cleanup for orphaned processes
 
 USAGE:
-    kill-orphans.sh [OPTIONS]
+    sep_kill_orphans.sh [OPTIONS]
 
 DESCRIPTION:
     Finds and terminates processes that have been orphaned (parent PID = 1)
@@ -153,15 +162,7 @@ echo "Checking for stale lock files..."
 
 LOCKS_REMOVED=0
 
-# Get project info
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-
-# Source .env.development if it exists
-if [ -f "${PROJECT_ROOT}/.env.development" ]; then
-    set -a  # Export all variables
-    source "${PROJECT_ROOT}/.env.development"
-    set +a
-fi
+# PROJECT_ROOT and environment variables are now set by init_sep_common
 
 # Use configured lock directory or default
 LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"

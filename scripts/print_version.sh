@@ -12,11 +12,13 @@ set -euo pipefail
 
 VERSION='1.0.0'
 
-# Colors
-BLUE='\033[0;34m'
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-NC='\033[0m'
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
+
+# Colors are now defined in sep_common.sh
 
 # Get current version from pyproject.toml
 get_current_version() {

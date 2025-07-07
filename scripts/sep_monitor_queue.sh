@@ -6,6 +6,15 @@ set -euo pipefail
 
 VERSION='8.4.0'
 
+# Get the directory where this script is located
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
+
+# Initialize common variables
+init_sep_common
+
 # Display help message
 show_help() {
     cat << 'EOF'
@@ -75,16 +84,8 @@ if [[ "${1:-}" == "--version" ]]; then
     exit 0
 fi
 
-# Get project info
-PROJECT_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+# PROJECT_ROOT is now set by init_sep_common
 PROJECT_HASH=$(echo "$PROJECT_ROOT" | shasum | cut -d' ' -f1 | head -c 8)
-
-# Source .env.development if it exists
-if [ -f "${PROJECT_ROOT}/.env.development" ]; then
-    set -a  # Export all variables
-    source "${PROJECT_ROOT}/.env.development"
-    set +a
-fi
 
 # State files (consistent naming across all scripts)
 LOCK_BASE_DIR="${SEQUENTIAL_LOCK_BASE_DIR:-${PROJECT_ROOT}/.sequential-locks}"
@@ -94,13 +95,7 @@ QUEUE_FILE="${LOCK_DIR}/queue.txt"
 CURRENT_PID_FILE="${LOCK_DIR}/current.pid"
 ORPHAN_LOG="${LOCK_DIR}/orphans.log"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# Colors are now defined in sep_common.sh
 
 # Clear screen and show header
 show_header() {

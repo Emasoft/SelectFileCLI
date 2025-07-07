@@ -18,20 +18,13 @@ VERSION='8.4.0'
 SCRIPT_NAME="$(basename "$0")"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Try to find project root
-if git rev-parse --show-toplevel >/dev/null 2>&1; then
-    PROJECT_ROOT="$(git rev-parse --show-toplevel)"
-else
-    PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-fi
+# Source common functions and definitions
+source "${SCRIPT_DIR}/sep_common.sh"
 
-# Colors
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+# Initialize common variables (sets PROJECT_ROOT)
+init_sep_common
+
+# Colors are now defined in sep_common.sh
 
 # Display help message
 show_help() {
@@ -119,26 +112,7 @@ declare -A EXPECTED_VERSIONS=(
     ["sep_tool_atomifier.sh"]="8.4.0"
 )
 
-# Logging functions
-log_info() {
-    echo -e "${GREEN}[INFO]${NC} $*"
-}
-
-log_warn() {
-    echo -e "${YELLOW}[WARN]${NC} $*" >&2
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $*" >&2
-}
-
-log_success() {
-    echo -e "${GREEN}✓${NC} $*"
-}
-
-log_fail() {
-    echo -e "${RED}✗${NC} $*"
-}
+# Logging functions are now defined in sep_common.sh
 
 # =============================================================
 # SHARED FUNCTIONS

@@ -5,10 +5,10 @@
 #
 # -------------------------------------------------------------------------
 # USAGE
-#   ./sep_wait_all.sh [OPTIONS] -- <…command and args…>
+#   ./sep.sh [OPTIONS] -- <…command and args…>
 #
 #   (Legacy single-string form, still supported)
-#   ./sep_wait_all.sh [OPTIONS] "<…command and args…>"
+#   ./sep.sh [OPTIONS] "<…command and args…>"
 #
 # DESCRIPTION
 #  Executes the supplied command in a fresh process group and blocks until
@@ -80,52 +80,52 @@
 # EXAMPLES
 #
 # 🔹 Classic
-#     ./sep_wait_all.sh -- echo "hello world"
+#     ./sep.sh -- echo "hello world"
 #
 # 🔹 Verbose mode
-#     ./sep_wait_all.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
+#     ./sep.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
 #
 # 🔹 Logging output (custom path)
-#     ./sep_wait_all.sh --log /tmp/run.log -- python3 -c 'print(42)'
+#     ./sep.sh --log /tmp/run.log -- python3 -c 'print(42)'
 #
 # 🔹 JSON output
-#     ./sep_wait_all.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
+#     ./sep.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
 #
 # 🔹 Kill if it takes too long
-#     ./sep_wait_all.sh --timeout 5 -- sleep 10
+#     ./sep.sh --timeout 5 -- sleep 10
 #
 # 🔹 Use SIGKILL instead of SIGTERM on timeout
-#     ./sep_wait_all.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
+#     ./sep.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
 #
 # 🔹 Retry command up to 3 times
-#     ./wait_all.sh --retry 3 -- bash -c 'echo fail ; exit 1'
+#     ./sep.sh --retry 3 -- bash -c 'echo fail ; exit 1'
 #
 # 🔹 Retry on timeout
-#     ./wait_all.sh --timeout 2 --retry 2 -- sleep 5
+#     ./sep.sh --timeout 2 --retry 2 -- sleep 5
 #
 # 🔹 Combine everything
-#     ./wait_all.sh --timeout 3 --kill-signal SIGKILL --retry 2 \
+#     ./sep.sh --timeout 3 --kill-signal SIGKILL --retry 2 \
 #                   --verbose --log out.log --json -- \
 #                   bash -c 'sleep 5 ; echo done'
 #
 # 🔹 Capture output into a variable
-#     result=$(./wait_all.sh -- echo foo)
+#     result=$(./sep.sh -- echo foo)
 #     echo "Got: $result"
 #
 # ----------  Automatic runner examples -----------------------------------
 #
-#   ./wait_all.sh -- foo.py 1 2                  # → uv run foo.py 1 2
-#   ./wait_all.sh -- python script.py -x         # → uv run script.py -x
-#   ./wait_all.sh -- python -m pip install rich  # → uv pip install rich
-#   ./wait_all.sh -- bash build.sh --fast        # → uv run build.sh --fast
-#   ./wait_all.sh -- cleanup.sh                  # → uv run cleanup.sh
-#   ./wait_all.sh -- pip install numpy           # → uv pip install numpy
-#   ./wait_all.sh -- npm run lint                # → pnpm run lint
-#   ./wait_all.sh -- build                       # → pnpm run build
+#   ./sep.sh -- foo.py 1 2                  # → uv run foo.py 1 2
+#   ./sep.sh -- python script.py -x         # → uv run script.py -x
+#   ./sep.sh -- python -m pip install rich  # → uv pip install rich
+#   ./sep.sh -- bash build.sh --fast        # → uv run build.sh --fast
+#   ./sep.sh -- cleanup.sh                  # → uv run cleanup.sh
+#   ./sep.sh -- pip install numpy           # → uv pip install numpy
+#   ./sep.sh -- npm run lint                # → pnpm run lint
+#   ./sep.sh -- build                       # → pnpm run build
 #
 # ----------  Dependency-installer example --------------------------------
 #
-#   ./wait_all.sh --install-deps --verbose -- jq --version
+#   ./sep.sh --install-deps --verbose -- jq --version
 #
 # -------------------------------------------------------------------------
 
@@ -144,10 +144,10 @@ A portable “run-and-really-wait” wrapper
 ======================================================
 
  USAGE
-   ./wait_all.sh [OPTIONS] -- <…command and args…>
+   ./sep.sh [OPTIONS] -- <…command and args…>
 
    (Legacy single-string form, still supported)
-   ./wait_all.sh [OPTIONS] "<…command and args…>"
+   ./sep.sh [OPTIONS] "<…command and args…>"
 
 DESCRIPTION
   Executes the supplied command in a fresh process group and blocks until
@@ -217,52 +217,52 @@ SEE ALSO
  --------------------------  USAGE EXAMPLES  -----------------------------
 
  🔹 Classic
-     ./wait_all.sh -- my_executable
+     ./sep.sh -- my_executable
 
  🔹 Verbose mode
-     ./wait_all.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
+     ./sep.sh --verbose -- bash -c 'sleep 1 & sleep 2 & wait'
 
  🔹 Logging output (custom path)
-     ./wait_all.sh --log /tmp/run.log -- python3 -c 'print(42)'
+     ./sep.sh --log /tmp/run.log -- python3 -c 'print(42)'
 
  🔹 JSON output
-     ./wait_all.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
+     ./sep.sh --json -- bash -c 'echo out ; echo err >&2 ; exit 3'
 
  🔹 Kill if it takes too long
-     ./wait_all.sh --timeout 5 -- sleep 10
+     ./sep.sh --timeout 5 -- sleep 10
 
  🔹 Use SIGKILL instead of SIGTERM on timeout
-     ./wait_all.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
+     ./sep.sh --timeout 5 --kill-signal SIGKILL -- sleep 10
 
  🔹 Retry command up to 3 times
-     ./wait_all.sh --retry 3 -- bash -c 'echo fail ; exit 1'
+     ./sep.sh --retry 3 -- bash -c 'echo fail ; exit 1'
 
  🔹 Retry on timeout
-     ./wait_all.sh --timeout 2 --retry 2 -- sleep 5
+     ./sep.sh --timeout 2 --retry 2 -- sleep 5
 
  🔹 Combine everything
-     ./wait_all.sh --timeout 3 --kill-signal SIGKILL --retry 2 \
+     ./sep.sh --timeout 3 --kill-signal SIGKILL --retry 2 \
                    --verbose --log out.log --json -- \
                    bash -c 'sleep 5 ; echo done'
 
  🔹 Capture output into a variable
-     result=$(./wait_all.sh -- echo foo)
+     result=$(./sep.sh -- echo foo)
      echo "Got: $result"
 
  ----------  Automatic runner examples -----------------------------------
 
-   ./wait_all.sh -- foo.py 1 2                  # → uv run foo.py 1 2
-   ./wait_all.sh -- python script.py -x         # → uv run script.py -x
-   ./wait_all.sh -- python -m pip install rich  # → uv pip install rich
-   ./wait_all.sh -- bash build.sh --fast        # → uv run build.sh --fast
-   ./wait_all.sh -- cleanup.sh                  # → uv run cleanup.sh
-   ./wait_all.sh -- pip install numpy           # → uv pip install numpy
-   ./wait_all.sh -- npm run lint                # → pnpm run lint
-   ./wait_all.sh -- build                       # → pnpm run build
+   ./sep.sh -- foo.py 1 2                  # → uv run foo.py 1 2
+   ./sep.sh -- python script.py -x         # → uv run script.py -x
+   ./sep.sh -- python -m pip install rich  # → uv pip install rich
+   ./sep.sh -- bash build.sh --fast        # → uv run build.sh --fast
+   ./sep.sh -- cleanup.sh                  # → uv run cleanup.sh
+   ./sep.sh -- pip install numpy           # → uv pip install numpy
+   ./sep.sh -- npm run lint                # → pnpm run lint
+   ./sep.sh -- build                       # → pnpm run build
 
  ----------  Dependency-installer example --------------------------------
 
-   ./wait_all.sh --install-deps --verbose -- jq --version
+   ./sep.sh --install-deps --verbose -- jq --version
 
  -------------------------------------------------------------------------
 
